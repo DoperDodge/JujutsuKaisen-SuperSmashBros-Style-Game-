@@ -1,18 +1,44 @@
 // Keyboard + Gamepad input manager with per-frame snapshot + 6-frame buffer.
 // Two local players supported via separate keymaps and gamepad slots 0/1.
 //
-// Gamepad layout (Xbox / PlayStation / generic 16-button):
-//   Left stick / D-pad : movement
-//   A / Cross          : Jump
-//   X / Square         : Attack
-//   Y / Triangle       : Special
-//   B / Circle         : Grab
-//   RB / R1            : Shield
-//   LT/RT (axes 6/7)   : combine to trigger Domain (held with Special+Attack)
-//   Back / Share       : Taunt
+// Supported controllers:
+//   - Xbox One / Series (XInput, "standard" mapping)
+//   - PlayStation DualShock 4 / DualSense ("standard" mapping)
+//   - Nintendo Switch Pro Controller (USB or BT) — detected by id, both
+//     "standard" and Firefox's non-standard layout are handled.
+//   - Single Joy-Con (L or R) — detected by id, sideways layout where
+//     SL/SR act as shoulders and the stick is the only d-pad.
+//   - Any other XInput / generic gamepad falls back to standard mapping.
+//
+// Logical mapping (game action -> physical button position, regardless of label):
+//   Jump   = bottom face button   (Xbox A, PS Cross, Switch B)
+//   Attack = left face button     (Xbox X, PS Square, Switch Y)
+//   Special= top face button      (Xbox Y, PS Triangle, Switch X)
+//   Grab   = right face button    (Xbox B, PS Circle, Switch A)
+//   Shield = right shoulder       (RB / R1 / R)
+//   Domain Expansion = Shield + Special + Attack (L+R+B per spec)
 
 import { INPUT, DEFAULT_KEYMAP_P1, DEFAULT_KEYMAP_P2 } from '../../../shared/InputCodes.js';
 import { CONSTANTS } from '../../../shared/Constants.js';
+
+// Detect controller family from gamepad.id string.
+// Returns one of: 'xbox' | 'playstation' | 'switch-pro' | 'joycon-l' | 'joycon-r' | 'generic'.
+function detectControllerKind(id = '') {
+  const s = id.toLowerCase();
+  // Nintendo USB vendor ID is 057e
+  if (s.includes('057e')) {
+    if (s.includes('2006') || s.includes('joy-con (l)') || s.includes('joycon (l)')) return 'joycon-l';
+    if (s.includes('2007') || s.includes('joy-con (r)') || s.includes('joycon (r)')) return 'joycon-r';
+    return 'switch-pro'; // 2009 = Pro Controller, also fallback for 200e charging grip
+  }
+  if (s.includes('pro controller') || s.includes('switch')) return 'switch-pro';
+  if (s.includes('joy-con') || s.includes('joycon')) {
+    return s.includes('(r)') ? 'joycon-r' : 'joycon-l';
+  }
+  if (s.includes('xinput') || s.includes('xbox') || s.includes('045e')) return 'xbox';
+  if (s.includes('dualshock') || s.includes('dualsense') || s.includes('054c') || s.includes('playstation')) return 'playstation';
+  return 'generic';
+}
 
 export class InputManager {
   constructor() {
@@ -22,6 +48,7 @@ export class InputManager {
     this.lastFrame = [0, 0];
     this.gamepadMasks = [0, 0];
     this.gamepadConnected = [false, false];
+    this.gamepadKinds = ['generic', 'generic'];
     window.addEventListener('keydown', e => {
       this.held.add(e.code);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -30,44 +57,109 @@ export class InputManager {
     window.addEventListener('blur', () => this.held.clear());
     window.addEventListener('gamepadconnected', e => {
       const idx = e.gamepad.index;
-      if (idx < 2) this.gamepadConnected[idx] = true;
-      console.log('[input] gamepad connected slot', idx, e.gamepad.id);
+      if (idx < 2) {
+        this.gamepadConnected[idx] = true;
+        this.gamepadKinds[idx] = detectControllerKind(e.gamepad.id);
+      }
+      console.log('[input] gamepad connected slot', idx, '-', e.gamepad.id, '->', detectControllerKind(e.gamepad.id));
     });
     window.addEventListener('gamepaddisconnected', e => {
       const idx = e.gamepad.index;
-      if (idx < 2) this.gamepadConnected[idx] = false;
+      if (idx < 2) {
+        this.gamepadConnected[idx] = false;
+        this.gamepadKinds[idx] = 'generic';
+      }
     });
+  }
+
+  // Translate a gamepad's raw buttons into our INPUT bitmask. The mapping
+  // depends on the controller kind so that physical button positions stay
+  // consistent across vendors (e.g. Switch's "B" stays mapped to Jump because
+  // it sits in the bottom face position).
+  _maskFromPad(pad, kind) {
+    let mask = 0;
+    const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
+    const btn = (n) => pad.buttons[n] && pad.buttons[n].pressed;
+    const standard = pad.mapping === 'standard';
+
+    if (kind === 'joycon-l' || kind === 'joycon-r') {
+      // A single Joy-Con held sideways. Stick is the only directional input,
+      // and only the four face buttons + SL/SR are usable. Both Joy-Cons
+      // expose the same shape; we just remap which side is "forward".
+      const sideX = pad.axes[0] || 0;
+      const sideY = pad.axes[1] || 0;
+      // When held sideways the original Y axis becomes horizontal
+      if (sideY < -0.4) mask |= (kind === 'joycon-l' ? INPUT.LEFT : INPUT.RIGHT);
+      if (sideY >  0.4) mask |= (kind === 'joycon-l' ? INPUT.RIGHT : INPUT.LEFT);
+      if (sideX < -0.4) mask |= (kind === 'joycon-l' ? INPUT.DOWN : INPUT.UP);
+      if (sideX >  0.4) mask |= (kind === 'joycon-l' ? INPUT.UP : INPUT.DOWN);
+      // Face buttons in sideways layout: 4 buttons in a row.
+      // L Joy-Con sideways: arrow buttons; R Joy-Con sideways: A/B/X/Y.
+      if (btn(0)) mask |= INPUT.JUMP;
+      if (btn(1)) mask |= INPUT.ATTACK;
+      if (btn(2)) mask |= INPUT.SPECIAL;
+      if (btn(3)) mask |= INPUT.GRAB;
+      // SL / SR shoulders
+      if (btn(4) || btn(5)) mask |= INPUT.SHIELD;
+      if (btn(8) || btn(9)) mask |= INPUT.TAUNT;
+      return mask;
+    }
+
+    // Stick + dpad
+    if (ax < -0.4) mask |= INPUT.LEFT;
+    if (ax >  0.4) mask |= INPUT.RIGHT;
+    if (ay < -0.4) mask |= INPUT.UP;
+    if (ay >  0.4) mask |= INPUT.DOWN;
+    if (btn(12)) mask |= INPUT.UP;
+    if (btn(13)) mask |= INPUT.DOWN;
+    if (btn(14)) mask |= INPUT.LEFT;
+    if (btn(15)) mask |= INPUT.RIGHT;
+
+    if (kind === 'switch-pro' && !standard) {
+      // Firefox / non-standard layout for Switch Pro Controller.
+      // Reported order observed: 0=B, 1=A, 2=Y, 3=X, 4=L, 5=R, 6=ZL, 7=ZR,
+      // 8=Minus, 9=Plus, 10=LStick, 11=RStick, 12=Home, 13=Capture
+      if (btn(0)) mask |= INPUT.JUMP;     // Switch B (bottom)
+      if (btn(2)) mask |= INPUT.ATTACK;   // Switch Y (left)
+      if (btn(3)) mask |= INPUT.SPECIAL;  // Switch X (top)
+      if (btn(1)) mask |= INPUT.GRAB;     // Switch A (right)
+      if (btn(5) || btn(7)) mask |= INPUT.SHIELD; // R or ZR
+      if (btn(4) || btn(6)) mask |= INPUT.SHIELD; // L or ZL also = shield (frees Domain combo)
+      if (btn(8)) mask |= INPUT.TAUNT;    // Minus
+      return mask;
+    }
+
+    // Standard mapping for Xbox / PS / Switch Pro (Chrome) / generic.
+    // Position-based: button 0 is always the bottom face button regardless
+    // of label (A on Xbox, Cross on PS, B on Switch).
+    if (btn(0)) mask |= INPUT.JUMP;     // bottom face
+    if (btn(2)) mask |= INPUT.ATTACK;   // left face
+    if (btn(3)) mask |= INPUT.SPECIAL;  // top face
+    if (btn(1)) mask |= INPUT.GRAB;     // right face
+    if (btn(5) || btn(7)) mask |= INPUT.SHIELD; // RB / R1 / R / RT / R2 / ZR
+    if (btn(4) || btn(6)) mask |= INPUT.SHIELD; // LB / LT also fires shield
+    if (btn(8) || btn(9)) mask |= INPUT.TAUNT;
+    return mask;
   }
 
   pollGamepads() {
     if (!navigator.getGamepads) return;
     const pads = navigator.getGamepads();
-    for (let i = 0; i < 2; i++) {
+    let slot = 0;
+    for (let i = 0; i < pads.length && slot < 2; i++) {
       const pad = pads[i];
-      if (!pad) { this.gamepadMasks[i] = 0; continue; }
-      let mask = 0;
-      const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
-      if (ax < -0.4) mask |= INPUT.LEFT;
-      if (ax >  0.4) mask |= INPUT.RIGHT;
-      if (ay < -0.4) mask |= INPUT.UP;
-      if (ay >  0.4) mask |= INPUT.DOWN;
-      // Standard mapping buttons
-      const btn = (n) => pad.buttons[n] && pad.buttons[n].pressed;
-      if (btn(12)) mask |= INPUT.UP;
-      if (btn(13)) mask |= INPUT.DOWN;
-      if (btn(14)) mask |= INPUT.LEFT;
-      if (btn(15)) mask |= INPUT.RIGHT;
-      if (btn(0))  mask |= INPUT.JUMP;     // A / Cross
-      if (btn(2))  mask |= INPUT.ATTACK;   // X / Square
-      if (btn(3))  mask |= INPUT.SPECIAL;  // Y / Triangle
-      if (btn(1))  mask |= INPUT.GRAB;     // B / Circle
-      if (btn(5) || btn(7)) mask |= INPUT.SHIELD; // RB or RT
-      if (btn(4) || btn(6)) {
-        // L-trigger held with attack+special triggers Domain Expansion (L+R+B)
-        mask |= INPUT.SHIELD;
+      if (!pad) continue;
+      // Lazily detect kind in case the connect event was missed.
+      if (this.gamepadKinds[slot] === 'generic') {
+        this.gamepadKinds[slot] = detectControllerKind(pad.id);
       }
-      if (btn(8)) mask |= INPUT.TAUNT;
-      this.gamepadMasks[i] = mask;
+      this.gamepadMasks[slot] = this._maskFromPad(pad, this.gamepadKinds[slot]);
+      this.gamepadConnected[slot] = true;
+      slot++;
+    }
+    for (; slot < 2; slot++) {
+      this.gamepadMasks[slot] = 0;
+      this.gamepadConnected[slot] = false;
     }
   }
 

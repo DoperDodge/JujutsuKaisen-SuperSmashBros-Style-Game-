@@ -32,10 +32,20 @@ const sprites = new SpriteSheet();
 sprites.build();
 
 // ===== Explicit per-control labels (for menus & overlays) =====
+// Controllers are mapped by physical button position so the same logical
+// action lives on the same place regardless of vendor labels.
 const KEYBINDS = {
   p1: { move: 'WASD', attack: 'J', special: 'K', jump: 'Space', shield: 'L', grab: ';', taunt: 'T' },
   p2: { move: 'Arrows', attack: 'Num1', special: 'Num2', jump: 'Num0', shield: 'Num3', grab: 'Num4', taunt: 'Num5' },
-  pad: { move: 'L-stick', attack: 'X / Square', special: 'Y / Triangle', jump: 'A / Cross', shield: 'RB / R1', grab: 'B / Circle', domain: 'Hold LT + RT + Special + Attack' },
+  pad: {
+    move: 'L-stick / D-pad',
+    attack: 'Xbox X  /  PS Square  /  Switch Y',
+    special: 'Xbox Y  /  PS Triangle  /  Switch X',
+    jump: 'Xbox A  /  PS Cross  /  Switch B',
+    grab: 'Xbox B  /  PS Circle  /  Switch A',
+    shield: 'R Shoulder (RB / R1 / R)',
+    domain: 'L + R + Special + Attack',
+  },
 };
 
 const FIGHTER_CLASSES = {
@@ -234,9 +244,12 @@ function drawTitle() {
   ctx.font = '22px monospace';
   ctx.fillStyle = '#a0a8c0';
   ctx.fillText('A Smash-style platform fighter', canvas.width / 2, 360);
-  ctx.font = 'bold 28px monospace';
+  ctx.font = 'bold 26px monospace';
   ctx.fillStyle = (menuTick % 60 < 40) ? '#ffe070' : '#666';
-  ctx.fillText('PRESS J  /  Num1  /  Controller X  TO START', canvas.width / 2, 500);
+  ctx.fillText('PRESS  J   /   Num1   /   Xbox X   /   PS Square   /   Switch Y', canvas.width / 2, 490);
+  ctx.font = '16px monospace';
+  ctx.fillStyle = '#5fd7ff88';
+  ctx.fillText('Plug in any controller — Xbox, PlayStation, or Nintendo Switch', canvas.width / 2, 520);
 
   // Roster preview row
   const startX = (canvas.width - ROSTER.length * 140) / 2;
@@ -281,9 +294,10 @@ function drawModeSelect() {
     ctx.fillStyle = disabled ? '#333' : '#a0a8c0';
     ctx.fillText(modes[i].sub, canvas.width / 2, y + 70);
   }
-  ctx.font = '16px monospace';
+  ctx.font = '15px monospace';
   ctx.fillStyle = '#5fd7ff88';
-  ctx.fillText('UP/DOWN to choose  •  J / Num1 / Controller X to confirm  •  L / Num3 / RB to back', canvas.width / 2, 680);
+  ctx.fillText('UP/DOWN to choose  •  Confirm: J / Num1 / Xbox X / PS Square / Switch Y', canvas.width / 2, 670);
+  ctx.fillText('Back: L / Num3 / R-shoulder', canvas.width / 2, 690);
   ctx.textAlign = 'left';
 }
 
@@ -383,16 +397,17 @@ function drawCharSelect() {
   }
 
   // Explicit binds
-  ctx.font = 'bold 20px monospace';
+  ctx.font = 'bold 18px monospace';
   ctx.fillStyle = '#ffe070';
-  ctx.fillText('Use LEFT/RIGHT to choose  •  Press J  (P1)  /  Num1  (P2)  /  Controller X  to LOCK IN', canvas.width / 2, 480);
-  ctx.font = '16px monospace';
+  ctx.fillText('LEFT/RIGHT to choose', canvas.width / 2, 470);
+  ctx.fillText('LOCK IN:  P1 = J    P2 = Num1    Xbox = X    PlayStation = Square    Switch = Y', canvas.width / 2, 494);
+  ctx.font = '15px monospace';
   ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('Back: L / Num3 / RB        Unlock: same key', canvas.width / 2, 506);
+  ctx.fillText('Back / unlock:  L  /  Num3  /  Right Shoulder (RB / R1 / R)', canvas.width / 2, 518);
   if (charLocked[0] && charLocked[1]) {
     ctx.fillStyle = '#ffe070';
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText('BOTH READY — PRESS K / Num2 / Controller Y TO CONTINUE', canvas.width / 2, 550);
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('BOTH READY — PRESS  K / Num2 / Xbox Y / PS Triangle / Switch X  TO CONTINUE', canvas.width / 2, 552);
   }
   ctx.textAlign = 'left';
 }
@@ -439,7 +454,10 @@ function drawStageSelect() {
   }
   ctx.font = 'bold 18px monospace';
   ctx.fillStyle = '#ffe070';
-  ctx.fillText('LEFT/RIGHT to choose  •  J / Num1 / Controller X to START  •  L / Num3 / RB to back', canvas.width / 2, 500);
+  ctx.fillText('LEFT/RIGHT to choose  •  Start: J / Num1 / Xbox X / PS Square / Switch Y', canvas.width / 2, 496);
+  ctx.font = '15px monospace';
+  ctx.fillStyle = '#a0a8c0';
+  ctx.fillText('Back: L / Num3 / R-shoulder', canvas.width / 2, 520);
   ctx.textAlign = 'left';
 }
 
@@ -455,7 +473,7 @@ function drawResult() {
   ctx.shadowBlur = 0;
   ctx.font = '22px monospace';
   ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('Press J / Num1 / Controller X to return to title', canvas.width / 2, canvas.height / 2 + 70);
+  ctx.fillText('Press J / Num1 / Xbox X / PS Square / Switch Y to return to title', canvas.width / 2, canvas.height / 2 + 70);
   ctx.textAlign = 'left';
 }
 
