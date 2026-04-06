@@ -18,7 +18,7 @@
 //   Shield = right shoulder       (RB / R1 / R)
 //   Domain Expansion = Shield + Special + Attack (L+R+B per spec)
 
-import { INPUT, DEFAULT_KEYMAP_P1, DEFAULT_KEYMAP_P2 } from '../../../shared/InputCodes.js';
+import { INPUT, DEFAULT_KEYMAP_P1 } from '../../../shared/InputCodes.js';
 import { CONSTANTS } from '../../../shared/Constants.js';
 
 // Detect controller family from gamepad.id string.
@@ -43,7 +43,9 @@ function detectControllerKind(id = '') {
 export class InputManager {
   constructor() {
     this.held = new Set();
-    this.maps = [DEFAULT_KEYMAP_P1, DEFAULT_KEYMAP_P2];
+    // Single keyboard map. The keyboard is treated as one device that can
+    // be assigned to either player slot — there is no separate P2 keymap.
+    this.maps = [DEFAULT_KEYMAP_P1];
     this.buffers = [[], []];
     this.lastFrame = [0, 0];
     this.gamepadMasks = [0, 0];
@@ -56,15 +58,14 @@ export class InputManager {
     // get treated as a held direction. Until an axis goes near 0 we ignore it.
     this.padAxisLive = [{}, {}];
     // Per-device -> player assignment. Each input device can be bound to
-    // player 0, player 1, or -1 (unassigned). Defaults pair keyboard sides
-    // and gamepad slots to their natural player so the game still works
-    // out of the box, but the player-assignment scene lets the user split
-    // them however they want (e.g. Xbox=P1, Switch=P2, both keyboards off).
-    this.assignments = { kb1: 0, kb2: 1, pad0: 0, pad1: 1 };
+    // player 0, player 1, or -1 (unassigned). The keyboard is a single
+    // P1 device by default; gamepads default to P1 / P2 so the game still
+    // works out of the box. The assignment scene lets the user reshuffle.
+    this.assignments = { kb1: 0, pad0: 0, pad1: 1 };
     // Per-device mask snapshots used by the assignment scene to detect
     // which physical device is pressing what.
-    this._deviceCur = { kb1: 0, kb2: 0, pad0: 0, pad1: 0 };
-    this._devicePrev = { kb1: 0, kb2: 0, pad0: 0, pad1: 0 };
+    this._deviceCur = { kb1: 0, pad0: 0, pad1: 0 };
+    this._devicePrev = { kb1: 0, pad0: 0, pad1: 0 };
     window.addEventListener('keydown', e => {
       this.held.add(e.code);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -226,8 +227,8 @@ export class InputManager {
 
   // Compute the raw mask for a single physical device, ignoring assignment.
   _maskForDevice(key) {
-    if (key === 'kb1' || key === 'kb2') {
-      const map = this.maps[key === 'kb1' ? 0 : 1];
+    if (key === 'kb1') {
+      const map = this.maps[0];
       let m = 0;
       for (const code in map) if (this.held.has(code)) m |= map[code];
       return m;
@@ -243,7 +244,6 @@ export class InputManager {
   snapshot(playerIndex) {
     let mask = 0;
     if (this.assignments.kb1 === playerIndex) mask |= this._maskForDevice('kb1');
-    if (this.assignments.kb2 === playerIndex) mask |= this._maskForDevice('kb2');
     if (this.assignments.pad0 === playerIndex) mask |= this._maskForDevice('pad0');
     if (this.assignments.pad1 === playerIndex) mask |= this._maskForDevice('pad1');
     return mask;
@@ -267,7 +267,6 @@ export class InputManager {
     // Snapshot per-device masks for edge detection in the assignment scene.
     this._devicePrev = { ...this._deviceCur };
     this._deviceCur.kb1 = this._maskForDevice('kb1');
-    this._deviceCur.kb2 = this._maskForDevice('kb2');
     this._deviceCur.pad0 = this._maskForDevice('pad0');
     this._deviceCur.pad1 = this._maskForDevice('pad1');
     for (let i = 0; i < 2; i++) {
