@@ -14,6 +14,15 @@ function px(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x | 0,
 // Pose definition: a pose drives limb offsets and FX layers.
 // Every character interprets pose with their own renderer.
 // =========================================================
+// Pose entries: limb offsets + an optional `swing` rect that gets recolored
+// per-character into a cursed-energy slash. `fx` is one of:
+//   'slash'  - directional slash arc (default)
+//   'punch'  - small impact star at hand position
+//   'orb'    - cursed-energy orb (used for specials)
+//   'beam'   - long horizontal energy beam
+//   'shock'  - vertical shockwave under feet
+//   'sweep'  - wide ground sweep
+//   'flare'  - aerial burst around the body
 const POSES = {
   idle:    { armA: [0, 0], armB: [0, 0], legA: 0, legB: 0, body: 0, head: 0, blink: 0 },
   idle2:   { armA: [0, -1], armB: [0, -1], legA: 0, legB: 0, body: -1, head: -1, blink: 0 },
@@ -24,17 +33,96 @@ const POSES = {
   jump:    { armA: [-2, -4], armB: [2, -4], legA: -3, legB: 3, body: -2, head: -2, blink: 0 },
   fall:    { armA: [-3, 1], armB: [3, 1], legA: -1, legB: 1, body: 1, head: 0, blink: 0 },
   shield:  { armA: [-2, 0], armB: [2, 0], legA: 0, legB: 0, body: 0, head: 0, blink: 0 },
-  attack1: { armA: [-2, 0], armB: [10, -1], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
-             swing: { x: 36, y: 38, w: 18, h: 4 } },
-  attack2: { armA: [-3, -2], armB: [12, -3], legA: -2, legB: 2, body: -1, head: 0, blink: 0,
-             swing: { x: 38, y: 30, w: 24, h: 6 } },
-  smash:   { armA: [-4, 1], armB: [14, 0], legA: -3, legB: 4, body: 0, head: 0, blink: 0,
-             swing: { x: 38, y: 34, w: 30, h: 12 } },
-  uair:    { armA: [-2, -6], armB: [2, -6], legA: -1, legB: 1, body: -2, head: -2, blink: 0,
-             swing: { x: 30, y: -2, w: 20, h: 10 } },
   hurt:    { armA: [3, 3], armB: [-3, 3], legA: 0, legB: 0, body: 1, head: 1, blink: 1 },
   domain:  { armA: [-3, -3], armB: [3, -3], legA: 0, legB: 0, body: -2, head: -2, blink: 0,
              swing: null, glow: true },
+
+  // ===== Ground basics =====
+  // Jab combo: three frames so a 3-hit jab cycles visibly.
+  jab_wind: { armA: [-2, 1], armB: [4, 0], legA: -1, legB: 1, body: 0, head: 0, blink: 0,
+              swing: { x: 40, y: 44, w: 8, h: 4 }, fx: 'punch' },
+  jab_hit:  { armA: [-2, 0], armB: [16, -2], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
+              swing: { x: 50, y: 38, w: 20, h: 6 }, fx: 'punch' },
+  jab_hit2: { armA: [-2, -1], armB: [18, -3], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
+              swing: { x: 52, y: 36, w: 22, h: 8 }, fx: 'punch' },
+
+  // Forward tilt: stepping jab.
+  ftilt_wind: { armA: [-3, 0], armB: [6, -1], legA: -2, legB: 3, body: 0, head: 0, blink: 0,
+                swing: { x: 44, y: 40, w: 10, h: 6 }, fx: 'slash' },
+  ftilt_hit:  { armA: [-3, 0], armB: [20, -2], legA: -3, legB: 4, body: 0, head: 0, blink: 0,
+                swing: { x: 50, y: 34, w: 28, h: 10 }, fx: 'slash' },
+
+  // Up tilt: rising fist / kick.
+  utilt_wind: { armA: [-2, -2], armB: [2, -2], legA: -1, legB: 1, body: -1, head: -1, blink: 0,
+                swing: { x: 36, y: 24, w: 12, h: 8 }, fx: 'slash' },
+  utilt_hit:  { armA: [-2, -8], armB: [2, -8], legA: -1, legB: 1, body: -2, head: -2, blink: 0,
+                swing: { x: 32, y: 6,  w: 18, h: 18 }, fx: 'slash' },
+
+  // Down tilt: low poke / sweep.
+  dtilt_wind: { armA: [-2, 4], armB: [6, 4], legA: -1, legB: 2, body: 1, head: 1, blink: 0,
+                swing: { x: 42, y: 80, w: 14, h: 6 }, fx: 'sweep' },
+  dtilt_hit:  { armA: [-2, 4], armB: [18, 4], legA: 0, legB: 4, body: 1, head: 1, blink: 0,
+                swing: { x: 50, y: 84, w: 26, h: 8 }, fx: 'sweep' },
+
+  // Smash attacks: huge windup → big release.
+  fsmash_wind: { armA: [-6, 0], armB: [-2, -1], legA: -3, legB: 3, body: 1, head: 0, blink: 0,
+                 swing: { x: 30, y: 38, w: 8, h: 6 }, fx: 'slash' },
+  fsmash_hit:  { armA: [-6, 1], armB: [22, -2], legA: -4, legB: 5, body: 0, head: 0, blink: 0,
+                 swing: { x: 50, y: 30, w: 36, h: 18 }, fx: 'slash' },
+  usmash_wind: { armA: [-3, 2], armB: [3, 2], legA: -2, legB: 2, body: 1, head: 1, blink: 0,
+                 swing: { x: 36, y: 46, w: 12, h: 6 }, fx: 'flare' },
+  usmash_hit:  { armA: [-4, -10], armB: [4, -10], legA: -3, legB: 3, body: -3, head: -3, blink: 0,
+                 swing: { x: 28, y: -8, w: 28, h: 30 }, fx: 'flare' },
+  dsmash_wind: { armA: [-2, -2], armB: [2, -2], legA: -1, legB: 1, body: -1, head: -1, blink: 0,
+                 swing: { x: 34, y: 70, w: 16, h: 6 }, fx: 'shock' },
+  dsmash_hit:  { armA: [-6, 6], armB: [6, 6], legA: 1, legB: 1, body: 2, head: 1, blink: 0,
+                 swing: { x: 8,  y: 86, w: 64, h: 14 }, fx: 'shock' },
+
+  // ===== Aerials =====
+  nair: { armA: [-6, 0], armB: [6, 0], legA: -2, legB: 2, body: 0, head: 0, blink: 0,
+          swing: { x: 12, y: 36, w: 56, h: 24 }, fx: 'flare' },
+  fair: { armA: [-3, -2], armB: [16, -3], legA: -2, legB: 2, body: -1, head: 0, blink: 0,
+          swing: { x: 50, y: 30, w: 24, h: 14 }, fx: 'slash' },
+  bair: { armA: [-16, -1], armB: [3, 1], legA: 2, legB: -2, body: -1, head: 0, blink: 0,
+          swing: { x: 4,  y: 32, w: 24, h: 14 }, fx: 'slash' },
+  uair: { armA: [-2, -8], armB: [2, -8], legA: -1, legB: 1, body: -3, head: -3, blink: 0,
+          swing: { x: 28, y: -4, w: 24, h: 14 }, fx: 'slash' },
+  dair: { armA: [-3, 6], armB: [3, 6], legA: 2, legB: -2, body: 2, head: 1, blink: 0,
+          swing: { x: 28, y: 96, w: 24, h: 14 }, fx: 'shock' },
+
+  // ===== Specials =====
+  // Neutral special: charge an orb at the front hand.
+  neutralspecial_wind: { armA: [-2, -1], armB: [12, -1], legA: -1, legB: 1, body: 0, head: 0, blink: 0,
+                         swing: { x: 50, y: 38, w: 12, h: 12 }, fx: 'orb' },
+  neutralspecial_hit:  { armA: [-2, -1], armB: [22, -2], legA: -2, legB: 2, body: 0, head: 0, blink: 0,
+                         swing: { x: 60, y: 32, w: 28, h: 28 }, fx: 'orb' },
+  // Side special: long horizontal beam.
+  sidespecial_wind: { armA: [-4, 0], armB: [10, -1], legA: -2, legB: 2, body: 0, head: 0, blink: 0,
+                      swing: { x: 48, y: 38, w: 16, h: 10 }, fx: 'orb' },
+  sidespecial_hit:  { armA: [-4, 0], armB: [24, -2], legA: -3, legB: 3, body: 0, head: 0, blink: 0,
+                      swing: { x: 56, y: 36, w: 60, h: 16 }, fx: 'beam' },
+  // Up special: vertical burst, body goes up.
+  upspecial_wind: { armA: [-2, 2], armB: [2, 2], legA: 0, legB: 0, body: 1, head: 1, blink: 0,
+                    swing: { x: 32, y: 56, w: 16, h: 8 }, fx: 'flare' },
+  upspecial_hit:  { armA: [-2, -10], armB: [2, -10], legA: 1, legB: -1, body: -3, head: -3, blink: 0,
+                    swing: { x: 26, y: -10, w: 28, h: 36 }, fx: 'flare' },
+  // Down special: counter / dome.
+  downspecial_wind: { armA: [-3, 0], armB: [3, 0], legA: 0, legB: 0, body: 0, head: 0, blink: 0,
+                      swing: { x: 24, y: 28, w: 32, h: 50 }, fx: 'orb' },
+  downspecial_hit:  { armA: [-6, -2], armB: [6, -2], legA: -1, legB: 1, body: -1, head: -1, blink: 0,
+                      swing: { x: 12, y: 16, w: 56, h: 70 }, fx: 'orb' },
+
+  // Grab.
+  grab: { armA: [-2, 0], armB: [22, 0], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
+          swing: { x: 56, y: 40, w: 14, h: 14 }, fx: 'punch' },
+
+  // Backwards-compat aliases used by old _updateAnim paths.
+  attack1: { armA: [-2, 0], armB: [16, -2], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
+             swing: { x: 50, y: 38, w: 20, h: 6 }, fx: 'punch' },
+  attack2: { armA: [-3, -2], armB: [22, -3], legA: -2, legB: 2, body: -1, head: 0, blink: 0,
+             swing: { x: 50, y: 30, w: 26, h: 8 }, fx: 'slash' },
+  smash:   { armA: [-6, 1], armB: [22, -2], legA: -4, legB: 5, body: 0, head: 0, blink: 0,
+             swing: { x: 50, y: 30, w: 36, h: 18 }, fx: 'slash' },
 };
 
 // =========================================================
@@ -333,20 +421,131 @@ const DRAWERS = {
 // =========================================================
 // Build pose with FX (slash trails, energy orbs, auras)
 // =========================================================
+const CE_COLORS = {
+  gojo:   { core: '#e8f6ff', mid: '#5fd7ff', edge: '#1850b0' },
+  yuji:   { core: '#fff3c8', mid: '#ffb84a', edge: '#a04000' },
+  sukuna: { core: '#ffd0d0', mid: '#ff3050', edge: '#600010' },
+  mahito: { core: '#e6ffd0', mid: '#9aff7a', edge: '#206020' },
+  todo:   { core: '#fff8c8', mid: '#ffe070', edge: '#806020' },
+};
+
 function drawPoseFX(ctx, pose, character) {
-  if (pose.swing) {
-    const s = pose.swing;
-    const accent = {
-      gojo: '#5fd7ff', yuji: '#ffb84a', sukuna: '#ff3050',
-      mahito: '#9aff7a', todo: '#ffe070',
-    }[character] || '#ffffff';
-    ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.85;
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-    ctx.globalAlpha = 0.4;
+  const s = pose.swing;
+  if (!s) return;
+  const c = CE_COLORS[character] || { core: '#ffffff', mid: '#cccccc', edge: '#666666' };
+  const fx = pose.fx || 'slash';
+  ctx.save();
+  if (fx === 'slash') {
+    // Layered slash trail with crescent shape.
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 4, s.y - 3, s.w + 8, s.h + 6);
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = c.mid;
     ctx.fillRect(s.x - 2, s.y - 1, s.w + 4, s.h + 2);
+    // Bright crescent
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = c.core;
+    for (let i = 0; i < s.h; i++) {
+      const inset = Math.abs((i - s.h / 2)) | 0;
+      ctx.fillRect(s.x + inset, s.y + i, s.w - inset * 2, 1);
+    }
+    // Sparkle dots
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x + s.w - 2, s.y + (s.h >> 1) - 1, 2, 2);
+    ctx.fillRect(s.x + s.w + 2, s.y + (s.h >> 1) + 2, 1, 1);
+  } else if (fx === 'punch') {
+    // Impact star.
+    const cx = s.x + (s.w >> 1), cy = s.y + (s.h >> 1);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = c.core;
+    ctx.fillRect(cx - 1, cy - 4, 2, 8);
+    ctx.fillRect(cx - 4, cy - 1, 8, 2);
+    ctx.fillStyle = c.mid;
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(cx - 2, cy - 6, 4, 2);
+    ctx.fillRect(cx - 2, cy + 4, 4, 2);
+    ctx.fillRect(cx - 6, cy - 2, 2, 4);
+    ctx.fillRect(cx + 4, cy - 2, 2, 4);
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+  } else if (fx === 'orb') {
+    // Concentric energy orb.
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+    const r = Math.max(s.w, s.h) / 2;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = c.edge;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.65;
+    ctx.fillStyle = c.mid;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = c.core;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    // Highlight
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect((cx - r * 0.3) | 0, (cy - r * 0.3) | 0, 2, 2);
+  } else if (fx === 'beam') {
+    // Long horizontal energy beam with bright core.
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 2, s.y - 2, s.w + 4, s.h + 4);
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
     ctx.globalAlpha = 1;
+    ctx.fillStyle = c.core;
+    ctx.fillRect(s.x, s.y + (s.h >> 2), s.w, Math.max(2, s.h >> 1));
+    // Tip flare
+    ctx.fillRect(s.x + s.w, s.y - 1, 3, s.h + 2);
+  } else if (fx === 'shock') {
+    // Ground shockwave: triangles spreading outward.
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 4, s.y, s.w + 8, s.h);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+    ctx.fillStyle = c.core;
+    for (let i = 0; i < s.w; i += 4) {
+      ctx.fillRect(s.x + i, s.y - 2, 2, 2);
+    }
+    // Cracks
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x + 6, s.y + s.h, 1, 2);
+    ctx.fillRect(s.x + s.w - 6, s.y + s.h, 1, 2);
+  } else if (fx === 'flare') {
+    // Aerial all-around aura.
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+    const r = Math.max(s.w, s.h) / 2;
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = c.edge;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = c.mid;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    // Spokes radiating
+    ctx.fillStyle = c.core;
+    for (let a = 0; a < 8; a++) {
+      const ang = (a / 8) * Math.PI * 2;
+      const x = cx + Math.cos(ang) * r;
+      const y = cy + Math.sin(ang) * r;
+      ctx.fillRect((x - 1) | 0, (y - 1) | 0, 2, 2);
+    }
+  } else if (fx === 'sweep') {
+    // Wide low ground sweep.
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 2, s.y - 1, s.w + 4, s.h + 2);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+    ctx.fillStyle = c.core;
+    ctx.fillRect(s.x + 2, s.y + 1, s.w - 4, Math.max(1, s.h - 3));
   }
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 // =========================================================

@@ -18,7 +18,29 @@ export class TodoFighter extends Fighter {
     if (this.zoneBuff > 0) this.zoneBuff--;
     // Faster shield regen passive
     if (this.shieldHP < 100) this.shieldHP = Math.min(100, this.shieldHP + 0.05);
+    // Auto-face nearest opponent (Todo's "scout the brother" passive). Skip
+    // when locked into an attack so swing direction stays consistent.
+    if (!this.facingLocked && this.state !== 'attack' && this.hitstun === 0) {
+      let target = null, best = Infinity;
+      for (const f of world.fighters) {
+        if (f === this || f.ko) continue;
+        const d = Math.abs(f.x - this.x);
+        if (d < best) { best = d; target = f; }
+      }
+      if (target) this.facing = (target.x >= this.x) ? 1 : -1;
+    }
     super.tick(input, world);
+    // Re-apply opponent facing after physics, since the base class flips
+    // facing from velocity inside _afterMove.
+    if (!this.facingLocked && this.state !== 'attack' && this.hitstun === 0) {
+      let target = null, best = Infinity;
+      for (const f of world.fighters) {
+        if (f === this || f.ko) continue;
+        const d = Math.abs(f.x - this.x);
+        if (d < best) { best = d; target = f; }
+      }
+      if (target) this.facing = (target.x >= this.x) ? 1 : -1;
+    }
   }
 
   // Boogie Woogie swap with closest opponent within range
