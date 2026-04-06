@@ -294,9 +294,9 @@ function drawControllerDiagnostic(ctx) {
     if (d.mask & INPUT.SHIELD) dirs.push('SHD');
     if (d.mask & INPUT.GRAB) dirs.push('GRB');
     const ax = `axes[${d.axes.join(',')}]`;
-    const live = d.liveAxes && d.liveAxes.length ? ` live{${d.liveAxes.join(',')}}` : ' live{none yet}';
+    const liveStr = d.liveAxes && d.liveAxes.length ? ` live{${d.liveAxes.join(',')}}` : ' live{none yet}';
     const btns = d.pressed.length ? ` btn[${d.pressed.join(',')}]` : '';
-    ctx.fillText(`   ${ax}${live}${btns} -> ${dirs.join(' ') || '(idle)'}`, 16, y + 12);
+    ctx.fillText(`   ${ax}${liveStr}${btns} -> ${dirs.join(' ') || '(idle)'}`, 16, y + 12);
   }
 }
 
