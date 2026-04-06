@@ -55,6 +55,16 @@ export class InputManager {
     // sit at constant extreme values like -1.0 forever and would otherwise
     // get treated as a held direction. Until an axis goes near 0 we ignore it.
     this.padAxisLive = [{}, {}];
+    // Per-device -> player assignment. Each input device can be bound to
+    // player 0, player 1, or -1 (unassigned). Defaults pair keyboard sides
+    // and gamepad slots to their natural player so the game still works
+    // out of the box, but the player-assignment scene lets the user split
+    // them however they want (e.g. Xbox=P1, Switch=P2, both keyboards off).
+    this.assignments = { kb1: 0, kb2: 1, pad0: 0, pad1: 1 };
+    // Per-device mask snapshots used by the assignment scene to detect
+    // which physical device is pressing what.
+    this._deviceCur = { kb1: 0, kb2: 0, pad0: 0, pad1: 0 };
+    this._devicePrev = { kb1: 0, kb2: 0, pad0: 0, pad1: 0 };
     window.addEventListener('keydown', e => {
       this.held.add(e.code);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -214,18 +224,52 @@ export class InputManager {
     }
   }
 
-  // Build a bitmask of inputs for the given player using their keymap + gamepad
-  snapshot(playerIndex) {
-    const map = this.maps[playerIndex];
-    let mask = this.gamepadMasks[playerIndex] || 0;
-    for (const code in map) {
-      if (this.held.has(code)) mask |= map[code];
+  // Compute the raw mask for a single physical device, ignoring assignment.
+  _maskForDevice(key) {
+    if (key === 'kb1' || key === 'kb2') {
+      const map = this.maps[key === 'kb1' ? 0 : 1];
+      let m = 0;
+      for (const code in map) if (this.held.has(code)) m |= map[code];
+      return m;
     }
+    if (key === 'pad0') return this.gamepadMasks[0] || 0;
+    if (key === 'pad1') return this.gamepadMasks[1] || 0;
+    return 0;
+  }
+
+  // Build a bitmask of inputs for the given player by OR'ing every device
+  // currently assigned to that player. Devices with assignment === -1 are
+  // ignored entirely.
+  snapshot(playerIndex) {
+    let mask = 0;
+    if (this.assignments.kb1 === playerIndex) mask |= this._maskForDevice('kb1');
+    if (this.assignments.kb2 === playerIndex) mask |= this._maskForDevice('kb2');
+    if (this.assignments.pad0 === playerIndex) mask |= this._maskForDevice('pad0');
+    if (this.assignments.pad1 === playerIndex) mask |= this._maskForDevice('pad1');
     return mask;
   }
 
+  // Per-device assignment helpers consumed by the player-assignment scene.
+  setAssignment(deviceKey, playerIndex) {
+    if (deviceKey in this.assignments) this.assignments[deviceKey] = playerIndex;
+  }
+  getAssignment(deviceKey) { return this.assignments[deviceKey]; }
+  // True the frame `code` is freshly pressed on `deviceKey` (edge-triggered).
+  devicePressed(deviceKey, code) {
+    const cur = this._deviceCur[deviceKey] || 0;
+    const prev = this._devicePrev[deviceKey] || 0;
+    return (cur & code) !== 0 && (prev & code) === 0;
+  }
+  deviceMask(deviceKey) { return this._deviceCur[deviceKey] || 0; }
+
   tick() {
     this.pollGamepads();
+    // Snapshot per-device masks for edge detection in the assignment scene.
+    this._devicePrev = { ...this._deviceCur };
+    this._deviceCur.kb1 = this._maskForDevice('kb1');
+    this._deviceCur.kb2 = this._maskForDevice('kb2');
+    this._deviceCur.pad0 = this._maskForDevice('pad0');
+    this._deviceCur.pad1 = this._maskForDevice('pad1');
     for (let i = 0; i < 2; i++) {
       const mask = this.snapshot(i);
       this.buffers[i].push(mask);
