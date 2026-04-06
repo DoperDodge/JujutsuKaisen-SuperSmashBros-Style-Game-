@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Jujutsu Kaisen: Domain Clash</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html, body {
+      margin: 0; padding: 0; background: #000; color: #eee;
+      font-family: 'Courier New', monospace; overflow: hidden; height: 100%;
+    }
+    #game-wrapper {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    canvas#game {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      background: #08080f;
+      box-shadow: 0 0 60px #5fd7ff22;
+      max-width: 100vw; max-height: 100vh;
+    }
+    #overlay {
+      position: absolute; top: 8px; left: 8px;
+      font-size: 11px; opacity: 0.6; pointer-events: none;
+      text-shadow: 0 0 4px #000;
+    }
+    #lobby {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: #0c0e18ee; border: 1px solid #5fd7ff44; padding: 16px 22px;
+      display: none; z-index: 10; min-width: 320px;
+    }
+    #lobby h3 { margin: 0 0 10px 0; color: #5fd7ff; }
+    #lobby button, #lobby input {
+      background: #1a1f30; color: #eee; border: 1px solid #5fd7ff66;
+      padding: 6px 10px; margin: 4px 2px; font-family: inherit; cursor: pointer;
+    }
+    #lobby button:hover { background: #2a2f40; }
+  </style>
+</head>
+<body>
+  <div id="game-wrapper">
+    <canvas id="game" width="1280" height="720"></canvas>
+  </div>
+  <div id="overlay">JJK: Domain Clash — local: P1 WASD/JK/Space/L  P2 Arrows/Num12/Num0/Num3</div>
+  <div id="lobby">
+    <h3>Multiplayer Lobby</h3>
+    <button id="btn-create">Create Room</button>
+    <input id="room-code" placeholder="ROOM CODE" maxlength="6" />
+    <button id="btn-join">Join</button>
+    <div id="lobby-status" style="margin-top:8px;font-size:11px;opacity:.7"></div>
+    <button id="btn-close" style="float:right">Close</button>
+  </div>
+  <script type="module" src="../src/main.js"></script>
+</body>
+</html>
