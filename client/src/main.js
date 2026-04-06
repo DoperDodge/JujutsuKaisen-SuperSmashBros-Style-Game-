@@ -256,7 +256,47 @@ function drawTitle() {
   for (let i = 0; i < ROSTER.length; i++) {
     sprites.draw(ctx, ROSTER[i], (menuTick % 60 < 30) ? 'idle' : 'idle2', startX + i * 140 + 70, 640, 1);
   }
+  drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
+}
+
+// Live read-out of every connected gamepad. Lets the player verify their
+// pad is being seen and which slot (P1/P2) it is bound to. Shown on every
+// menu scene so controller issues are easy to debug.
+function drawControllerDiagnostic(ctx) {
+  const diag = input.diagnostics();
+  ctx.textAlign = 'left';
+  ctx.font = '12px monospace';
+  const baseY = canvas.height - 80;
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillText('CONTROLLERS', 16, baseY);
+  if (diag.length === 0) {
+    ctx.fillStyle = '#888';
+    ctx.fillText('(none detected — keyboard only)', 16, baseY + 16);
+    return;
+  }
+  for (let i = 0; i < diag.length; i++) {
+    const d = diag[i];
+    const y = baseY + 16 + i * 28;
+    const live = d.mask !== 0;
+    ctx.fillStyle = live ? '#ffe070' : '#a0a8c0';
+    const shortId = d.id.length > 56 ? d.id.slice(0, 53) + '...' : d.id;
+    ctx.fillText(`P${d.slot + 1} [${d.kind}/${d.mapping}] ${shortId}`, 16, y);
+    ctx.fillStyle = live ? '#9aff7a' : '#666';
+    const dirs = [];
+    if (d.mask & INPUT.LEFT) dirs.push('L');
+    if (d.mask & INPUT.RIGHT) dirs.push('R');
+    if (d.mask & INPUT.UP) dirs.push('U');
+    if (d.mask & INPUT.DOWN) dirs.push('D');
+    if (d.mask & INPUT.ATTACK) dirs.push('ATK');
+    if (d.mask & INPUT.SPECIAL) dirs.push('SPC');
+    if (d.mask & INPUT.JUMP) dirs.push('JMP');
+    if (d.mask & INPUT.SHIELD) dirs.push('SHD');
+    if (d.mask & INPUT.GRAB) dirs.push('GRB');
+    const ax = `axes[${d.axes.slice(0, 4).join(',')}]`;
+    const btns = d.pressed.length ? `btn[${d.pressed.join(',')}]` : '';
+    ctx.fillText(`   ${ax} ${btns} -> ${dirs.join(' ') || '(idle)'}`, 16, y + 12);
+  }
 }
 
 function drawModeSelect() {
@@ -298,6 +338,7 @@ function drawModeSelect() {
   ctx.fillStyle = '#5fd7ff88';
   ctx.fillText('UP/DOWN to choose  •  Confirm: J / Num1 / Xbox X / PS Square / Switch Y', canvas.width / 2, 670);
   ctx.fillText('Back: L / Num3 / R-shoulder', canvas.width / 2, 690);
+  drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
 
@@ -409,6 +450,7 @@ function drawCharSelect() {
     ctx.font = 'bold 20px monospace';
     ctx.fillText('BOTH READY — PRESS  K / Num2 / Xbox Y / PS Triangle / Switch X  TO CONTINUE', canvas.width / 2, 552);
   }
+  drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
 
@@ -508,8 +550,14 @@ function handleMenuInput() {
   const pressed = (p, code) => input.pressed(p, code);
   const eitherPressed = (code) => pressed(0, code) || pressed(1, code);
 
+  // On the title screen accept ANY face button so unknown controller layouts
+  // can still get into the game while the diagnostic helps the user identify
+  // the issue.
   if (scene === SCENE.TITLE) {
-    if (eitherPressed(INPUT.ATTACK)) scene = SCENE.MODE_SELECT;
+    if (eitherPressed(INPUT.ATTACK) || eitherPressed(INPUT.SPECIAL) ||
+        eitherPressed(INPUT.JUMP) || eitherPressed(INPUT.GRAB)) {
+      scene = SCENE.MODE_SELECT;
+    }
   } else if (scene === SCENE.MODE_SELECT) {
     if (eitherPressed(INPUT.UP))   modeCursor = (modeCursor + 2) % 3;
     if (eitherPressed(INPUT.DOWN)) modeCursor = (modeCursor + 1) % 3;
