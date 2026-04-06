@@ -366,6 +366,7 @@ export class Fighter {
     else if (this.state === 'shield') this.anim = 'shield';
     else if (this.hitstun > 0) this.anim = 'hurt';
     else if (!this.grounded) this.anim = this.vy < 0 ? 'jump' : 'fall';
+    else if (Math.abs(this.vx) > 2.5) this.anim = (this.animFrame % 12 < 6) ? 'run1' : 'run2';
     else if (Math.abs(this.vx) > 0.5) this.anim = (this.animFrame % 16 < 8) ? 'walk1' : 'walk2';
     else this.anim = (this.animFrame % 60 < 30) ? 'idle' : 'idle2';
     if (prevAnim !== this.anim) this.animFrame = 0;
