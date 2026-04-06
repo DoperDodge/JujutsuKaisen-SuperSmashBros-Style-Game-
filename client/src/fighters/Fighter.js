@@ -224,18 +224,33 @@ export class Fighter {
     const dirH = (right ? 1 : 0) - (left ? 1 : 0);
 
     if (pressedAttack) {
+      // Right-stick tilts and stick-flick smashes use the input manager.
+      // tilt = held right stick direction, smash = recent left-stick flick.
+      const im = world && world.input;
+      const tilt = im ? im.tiltDir(this.playerIndex) : { x: 0, y: 0 };
+      const smash = im ? im.smashFlick(this.playerIndex) : { x: 0, y: 0 };
       let moveName;
       if (!this.grounded) {
-        if (up) moveName = 'uair';
-        else if (down) moveName = 'dair';
+        if (up || tilt.y < 0) moveName = 'uair';
+        else if (down || tilt.y > 0) moveName = 'dair';
+        else if (tilt.x !== 0) moveName = (tilt.x === this.facing ? 'fair' : 'bair');
         else if (dirH !== 0) moveName = (dirH === this.facing ? 'fair' : 'bair');
         else moveName = 'nair';
+      } else if (smash.x !== 0 || smash.y !== 0) {
+        // Smash attack from stick flick (or shift-modified keyboard).
+        if (smash.y < 0) moveName = 'usmash';
+        else if (smash.y > 0) moveName = 'dsmash';
+        else { moveName = 'fsmash'; this.facing = smash.x; }
+      } else if (tilt.x !== 0 || tilt.y !== 0) {
+        // Right-stick tilt: explicit tilt regardless of movement direction.
+        if (tilt.y < 0) moveName = 'utilt';
+        else if (tilt.y > 0) moveName = 'dtilt';
+        else { moveName = 'ftilt'; this.facing = tilt.x; }
       } else if (down) moveName = 'dtilt';
       else if (up) moveName = 'utilt';
       else if (dirH !== 0) {
-        // smash if direction matches facing held & freshly tapped feel; for simplicity: any held direction = ftilt
         moveName = 'ftilt';
-        if (dirH !== 0) this.facing = dirH;
+        this.facing = dirH;
       } else moveName = 'jab';
       this.startAttack(moveName);
       return;
@@ -358,10 +373,27 @@ export class Fighter {
     else if (this.state === 'attack') {
       const m = this.currentMove;
       if (!m) this.anim = 'idle';
-      else if (m.name === 'jab' || m.name === 'ftilt' || m.name === 'utilt' || m.name === 'dtilt') this.anim = 'attack1';
-      else if (m.name === 'fsmash' || m.name === 'usmash' || m.name === 'dsmash') this.anim = 'smash';
-      else if (m.name === 'uair') this.anim = 'uair';
-      else this.anim = 'attack2';
+      else {
+        const inWind = this.actionTimer < m.startup;
+        const inActive = this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active;
+        // Pick phased pose for moves that have wind/hit frames; fall back
+        // to a single-frame pose for aerials/grab.
+        const phased = ['jab','ftilt','utilt','dtilt','fsmash','usmash','dsmash',
+                        'neutralspecial','sidespecial','upspecial','downspecial'];
+        if (phased.includes(m.name)) {
+          if (m.name === 'jab') {
+            // 3-hit jab visual: rotate frames so swings look animated.
+            if (inWind) this.anim = 'jab_wind';
+            else if (inActive) this.anim = (this.actionTimer % 4 < 2) ? 'jab_hit' : 'jab_hit2';
+            else this.anim = 'jab_hit';
+          } else {
+            this.anim = inWind ? `${m.name}_wind` : `${m.name}_hit`;
+          }
+        } else if (m.name === 'nair' || m.name === 'fair' || m.name === 'bair' || m.name === 'uair' || m.name === 'dair') {
+          this.anim = m.name;
+        } else if (m.name === 'grab') this.anim = 'grab';
+        else this.anim = 'attack1';
+      }
     }
     else if (this.state === 'shield') this.anim = 'shield';
     else if (this.hitstun > 0) this.anim = 'hurt';

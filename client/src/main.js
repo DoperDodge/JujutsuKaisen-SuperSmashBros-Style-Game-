@@ -185,11 +185,47 @@ function renderMatch() {
     }
     sprites.draw(renderer.ctx, f.character, f.anim, f.x, f.y, f.facing);
     if (f.passiveInfinity && f.ce > f.ceMax * 0.25) {
-      renderer.ctx.strokeStyle = 'rgba(150,200,255,0.35)';
-      renderer.ctx.lineWidth = 2;
-      renderer.ctx.beginPath();
-      renderer.ctx.arc(f.x, f.y - f.height / 2, 60, 0, Math.PI * 2);
-      renderer.ctx.stroke();
+      // Render Infinity field as a layered, shimmering sphere sized to the
+      // character. Two animated rings + a translucent fill so it actually
+      // reads on screen instead of looking like a tiny outline.
+      const ctx = renderer.ctx;
+      const cx = f.x, cy = f.y - f.height / 2;
+      // Sphere radius hugs the full character bounding box plus some buffer.
+      const baseR = Math.max(f.width, f.height) * 0.95;
+      const t = ((world.tick || 0) % 120) / 120;
+      const pulse = 1 + Math.sin((world.tick || 0) * 0.12) * 0.05;
+      const r = baseR * pulse;
+      // Soft fill
+      const grad = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
+      grad.addColorStop(0, 'rgba(180,220,255,0.05)');
+      grad.addColorStop(0.7, 'rgba(95,215,255,0.15)');
+      grad.addColorStop(1, 'rgba(24,80,176,0.0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      // Bright outer ring
+      ctx.strokeStyle = 'rgba(95,215,255,0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      // Spinning inner ring (dashed)
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(t * Math.PI * 2);
+      ctx.strokeStyle = 'rgba(232,246,255,0.7)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 8]);
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.78, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      // Counter-spinning ring
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-t * Math.PI * 2 * 1.5);
+      ctx.strokeStyle = 'rgba(140,180,255,0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 10]);
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
     }
     if (f.soulCorruption > 0) {
       renderer.ctx.fillStyle = '#9aff7a';

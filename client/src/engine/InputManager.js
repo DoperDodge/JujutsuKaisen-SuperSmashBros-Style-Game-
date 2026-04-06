@@ -66,11 +66,26 @@ export class InputManager {
     // which physical device is pressing what.
     this._deviceCur = { kb1: 0, pad0: 0, pad1: 0 };
     this._devicePrev = { kb1: 0, pad0: 0, pad1: 0 };
+    // Per-pad analog stick state. We track left/right stick raw values plus
+    // the previous-frame left value so we can detect SSB-Ultimate-style
+    // "stick flicks" (large per-frame deltas) which trigger smash attacks.
+    // Right stick stays a held direction and is used for tilt attacks.
+    this._padSticks = [
+      { lx: 0, ly: 0, rx: 0, ry: 0, plx: 0, ply: 0, flickX: 0, flickY: 0, flickFrames: 0 },
+      { lx: 0, ly: 0, rx: 0, ry: 0, plx: 0, ply: 0, flickX: 0, flickY: 0, flickFrames: 0 },
+    ];
+    // Keyboard smash buffer: holding shift while pressing direction+attack
+    // forces a smash, so keyboard players can still throw smash attacks.
+    this._kbSmashHeld = false;
     window.addEventListener('keydown', e => {
       this.held.add(e.code);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._kbSmashHeld = true;
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     });
-    window.addEventListener('keyup', e => this.held.delete(e.code));
+    window.addEventListener('keyup', e => {
+      this.held.delete(e.code);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this._kbSmashHeld = false;
+    });
     window.addEventListener('blur', () => this.held.clear());
     window.addEventListener('gamepadconnected', e => {
       const idx = e.gamepad.index;
@@ -191,6 +206,39 @@ export class InputManager {
       return mask;
     }
 
+    // Capture left + right stick raw values from the first two live (X,Y)
+    // axis pairs so callers can read tilt direction (right stick) and detect
+    // smash flicks (left stick deltas). Indices are best-effort: most pads
+    // are 0/1 (left) and 2/3 (right), but we fall back to scanning live pairs.
+    {
+      const ss = this._padSticks[slotIdx] || (this._padSticks[slotIdx] = { lx: 0, ly: 0, rx: 0, ry: 0, plx: 0, ply: 0, flickX: 0, flickY: 0, flickFrames: 0 });
+      ss.plx = ss.lx; ss.ply = ss.ly;
+      let foundLeft = false, foundRight = false;
+      for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 10; aIdx += 2) {
+        if (aIdx === 8) continue;
+        if (!isStickAxis(aIdx) || !isStickAxis(aIdx + 1)) continue;
+        const x = pad.axes[aIdx] || 0;
+        const y = pad.axes[aIdx + 1] || 0;
+        if (!foundLeft) { ss.lx = x; ss.ly = y; foundLeft = true; }
+        else if (!foundRight) { ss.rx = x; ss.ry = y; foundRight = true; break; }
+      }
+      if (!foundLeft) { ss.lx = 0; ss.ly = 0; }
+      if (!foundRight) { ss.rx = 0; ss.ry = 0; }
+      // Detect a stick flick: per-frame delta on the left stick that crosses
+      // the smash threshold. Latches for ~4 frames so the press of the attack
+      // button can land within the same window.
+      const SMASH_DELTA = 0.55;
+      const dx = ss.lx - ss.plx, dy = ss.ly - ss.ply;
+      if (Math.abs(dx) > SMASH_DELTA && Math.abs(ss.lx) > 0.5) {
+        ss.flickX = ss.lx > 0 ? 1 : -1; ss.flickFrames = 6;
+      }
+      if (Math.abs(dy) > SMASH_DELTA && Math.abs(ss.ly) > 0.5) {
+        ss.flickY = ss.ly > 0 ? 1 : -1; ss.flickFrames = 6;
+      }
+      if (ss.flickFrames > 0) ss.flickFrames--;
+      else { ss.flickX = 0; ss.flickY = 0; }
+    }
+
     // Standard mapping for Xbox / PS / Switch Pro (Chrome) / generic.
     // Position-based: button 0 is always the bottom face button regardless
     // of label (A on Xbox, Cross on PS, B on Switch).
@@ -306,6 +354,46 @@ export class InputManager {
       slot++;
     }
     return out;
+  }
+
+  // Right-stick tilt direction for player p, or 0 if not engaged.
+  // Returned as { x: -1|0|1, y: -1|0|1 }. Used by Fighter for tilt attacks.
+  tiltDir(p) {
+    let x = 0, y = 0;
+    const TH = 0.45;
+    for (let slot = 0; slot < 2; slot++) {
+      if (this.assignments['pad' + slot] !== p) continue;
+      const ss = this._padSticks[slot]; if (!ss) continue;
+      if (ss.rx < -TH) x = -1; else if (ss.rx > TH) x = 1;
+      if (ss.ry < -TH) y = -1; else if (ss.ry > TH) y = 1;
+      if (x || y) break;
+    }
+    return { x, y };
+  }
+  // Smash direction triggered by a stick-flick on the left stick this frame.
+  // Returns { x, y } direction with the latched flick, or 0/0 if none. The
+  // flick has a short window (set in _maskFromPad) so the player can press
+  // attack right after the flick to throw a smash.
+  smashFlick(p) {
+    let x = 0, y = 0;
+    for (let slot = 0; slot < 2; slot++) {
+      if (this.assignments['pad' + slot] !== p) continue;
+      const ss = this._padSticks[slot]; if (!ss) continue;
+      if (ss.flickFrames > 0) {
+        if (ss.flickX) x = ss.flickX;
+        if (ss.flickY) y = ss.flickY;
+        if (x || y) break;
+      }
+    }
+    // Keyboard players hold Shift for "smash modifier"
+    if (!x && !y && this.assignments.kb1 === p && this._kbSmashHeld) {
+      const m = this._maskForDevice('kb1');
+      if (m & INPUT.LEFT) x = -1;
+      else if (m & INPUT.RIGHT) x = 1;
+      if (m & INPUT.UP) y = -1;
+      else if (m & INPUT.DOWN) y = 1;
+    }
+    return { x, y };
   }
 
   current(p) { return this.buffers[p][this.buffers[p].length - 1] || 0; }
