@@ -49,6 +49,12 @@ export class InputManager {
     this.gamepadMasks = [0, 0];
     this.gamepadConnected = [false, false];
     this.gamepadKinds = ['generic', 'generic'];
+    // Per-slot per-axis "is this axis a real analog stick?" calibration.
+    // An axis is marked live the first time it's observed sitting near zero.
+    // Non-stick channels (IMU, gyro, parked unused axes) on some controllers
+    // sit at constant extreme values like -1.0 forever and would otherwise
+    // get treated as a held direction. Until an axis goes near 0 we ignore it.
+    this.padAxisLive = [{}, {}];
     window.addEventListener('keydown', e => {
       this.held.add(e.code);
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -68,6 +74,7 @@ export class InputManager {
       if (idx < 2) {
         this.gamepadConnected[idx] = false;
         this.gamepadKinds[idx] = 'generic';
+        this.padAxisLive[idx] = {};
       }
     });
   }
@@ -76,12 +83,22 @@ export class InputManager {
   // depends on the controller kind so that physical button positions stay
   // consistent across vendors (e.g. Switch's "B" stays mapped to Jump because
   // it sits in the bottom face position).
-  _maskFromPad(pad, kind) {
+  _maskFromPad(pad, kind, slotIdx = 0) {
     let mask = 0;
     const DEAD = 0.28; // generous so analog sticks with mild drift still work
     const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
     const btn = (n) => pad.buttons[n] && pad.buttons[n].pressed;
     const standard = pad.mapping === 'standard';
+    // Calibration: an axis is only treated as a directional stick after we've
+    // observed it within ±0.15 of zero at least once. This filters out IMU /
+    // gyro / unused channels that some controllers (notably some Switch Pro
+    // builds) park at constant extreme values like -1.0.
+    const liveSet = this.padAxisLive[slotIdx] || (this.padAxisLive[slotIdx] = {});
+    for (let i = 0; i < pad.axes.length; i++) {
+      const v = pad.axes[i];
+      if (typeof v === 'number' && Math.abs(v) < 0.15) liveSet[i] = true;
+    }
+    const isStickAxis = (i) => liveSet[i] === true;
 
     // Some non-standard layouts (notably Firefox + Switch Pro Controller)
     // expose the d-pad as a single "hat" axis rather than 4 buttons. The hat
@@ -129,10 +146,12 @@ export class InputManager {
     // Analog sticks. Different controllers / browsers report sticks at
     // different axis indices: most are 0/1 (left) and 2/3 (right), but some
     // Switch Pro builds expose IMU/gyro on the lower indices and the actual
-    // sticks at 4/5 or 6/7. Skip the hat axis (axes[9]) which we already
-    // parsed above as a d-pad and which would otherwise also be picked up
-    // here. Treat any adjacent (X,Y) pair past the deadzone as directional.
-    for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 8; aIdx += 2) {
+    // sticks at 4/5 or 6/7. We scan every adjacent (X,Y) pair, but only use
+    // axes that calibration has marked "live" (have visited near zero), so
+    // we don't pick up parked non-stick channels.
+    for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 10; aIdx += 2) {
+      if (aIdx === 8) continue; // axes[8]/[9] is the d-pad hat on some layouts
+      if (!isStickAxis(aIdx) || !isStickAxis(aIdx + 1)) continue;
       const x = pad.axes[aIdx] || 0;
       const y = pad.axes[aIdx + 1] || 0;
       if (x < -DEAD) mask |= INPUT.LEFT;
@@ -179,7 +198,7 @@ export class InputManager {
       if (this.gamepadKinds[slot] === 'generic') {
         this.gamepadKinds[slot] = detectControllerKind(pad.id);
       }
-      this.gamepadMasks[slot] = this._maskFromPad(pad, this.gamepadKinds[slot]);
+      this.gamepadMasks[slot] = this._maskFromPad(pad, this.gamepadKinds[slot], slot);
       this.gamepadConnected[slot] = true;
       slot++;
     }
@@ -223,12 +242,15 @@ export class InputManager {
       for (let b = 0; b < pad.buttons.length; b++) {
         if (pad.buttons[b] && pad.buttons[b].pressed) pressed.push(b);
       }
+      const liveSet = this.padAxisLive[slot] || {};
+      const liveAxes = Object.keys(liveSet).map(k => +k).sort((a, b) => a - b);
       out.push({
         slot,
         id: pad.id,
         kind: this.gamepadKinds[slot],
         mapping: pad.mapping || 'non-standard',
         axes: Array.from(pad.axes).map(v => Math.round(v * 100) / 100),
+        liveAxes,
         pressed,
         mask: this.gamepadMasks[slot] || 0,
       });
