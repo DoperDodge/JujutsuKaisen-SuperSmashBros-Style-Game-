@@ -1,6 +1,6 @@
 // Entry point. Bootstraps the 60fps loop, scenes, and the local game world.
-// Scenes: TITLE -> MODE_SELECT -> LOBBY (online) -> CHAR_SELECT -> STAGE_SELECT
-//         -> MATCH -> RESULT.
+// Scenes: TITLE -> MODE_SELECT -> [PLAYER_SELECT for local | LOBBY for online]
+//         -> CHAR_SELECT -> STAGE_SELECT -> MATCH -> RESULT.
 
 import { GameLoop } from './engine/GameLoop.js';
 import { InputManager } from './engine/InputManager.js';
@@ -58,7 +58,7 @@ const STAGES = [JujutsuHigh, Shibuya, Shinjuku];
 const STAGE_NAMES = ['Tokyo Jujutsu High', 'Shibuya Underground Station', 'Shinjuku Showdown'];
 
 // ===== Scenes =====
-const SCENE = { TITLE: 0, MODE_SELECT: 1, LOBBY: 2, CHAR_SELECT: 3, STAGE_SELECT: 4, MATCH: 5, RESULT: 6 };
+const SCENE = { TITLE: 0, MODE_SELECT: 1, LOBBY: 2, PLAYER_SELECT: 3, CHAR_SELECT: 4, STAGE_SELECT: 5, MATCH: 6, RESULT: 7 };
 let scene = SCENE.TITLE;
 let menuTick = 0;
 let charSelections = [0, 1];
@@ -250,12 +250,6 @@ function drawTitle() {
   ctx.font = '16px monospace';
   ctx.fillStyle = '#5fd7ff88';
   ctx.fillText('Plug in any controller — Xbox, PlayStation, or Nintendo Switch', canvas.width / 2, 520);
-
-  // Roster preview row
-  const startX = (canvas.width - ROSTER.length * 140) / 2;
-  for (let i = 0; i < ROSTER.length; i++) {
-    sprites.draw(ctx, ROSTER[i], (menuTick % 60 < 30) ? 'idle' : 'idle2', startX + i * 140 + 70, 640, 1);
-  }
   drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
@@ -391,6 +385,98 @@ function drawLobby() {
   ctx.font = '16px monospace';
   ctx.fillStyle = '#5fd7ff88';
   ctx.fillText('SHIELD / BACKSPACE to return', canvas.width / 2, 680);
+  ctx.textAlign = 'left';
+}
+
+// ===== Player / device assignment scene =====
+// Lets each physical input device explicitly bind to P1 or P2 so the
+// keyboard and gamepads stop fighting over the same player slot.
+const DEVICE_KEYS = ['kb1', 'kb2', 'pad0', 'pad1'];
+const DEVICE_LABELS = {
+  kb1: 'KEYBOARD (WASD + JKL)',
+  kb2: 'KEYBOARD (Arrows + Numpad)',
+  pad0: 'GAMEPAD SLOT 1',
+  pad1: 'GAMEPAD SLOT 2',
+};
+
+function drawPlayerSelect() {
+  const ctx = renderer.ctx;
+  renderer.clear('#04050a');
+  drawBackground(ctx);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
+  ctx.fillText('ASSIGN CONTROLS', canvas.width / 2, 90);
+  ctx.shadowBlur = 0;
+  ctx.font = '18px monospace';
+  ctx.fillStyle = '#a0a8c0';
+  ctx.fillText('Each device picks its player slot. They will not control the same player.', canvas.width / 2, 124);
+
+  const cardW = 760, cardH = 96;
+  const startY = 170;
+  const diag = input.diagnostics();
+  const padNames = { pad0: '(none connected)', pad1: '(none connected)' };
+  for (const d of diag) {
+    padNames['pad' + d.slot] = `${d.kind} — ${d.id.length > 38 ? d.id.slice(0, 35) + '...' : d.id}`;
+  }
+
+  for (let i = 0; i < DEVICE_KEYS.length; i++) {
+    const key = DEVICE_KEYS[i];
+    const x = (canvas.width - cardW) / 2;
+    const y = startY + i * (cardH + 14);
+    const slot = input.getAssignment(key);
+    ctx.fillStyle = '#0a0d18';
+    ctx.fillRect(x, y, cardW, cardH);
+    ctx.strokeStyle = slot === 0 ? '#ffe070' : (slot === 1 ? '#ff60a0' : '#5fd7ff44');
+    ctx.lineWidth = slot === -1 ? 1 : 4;
+    ctx.strokeRect(x, y, cardW, cardH);
+
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(DEVICE_LABELS[key], x + 20, y + 32);
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#a0a8c0';
+    if (key.startsWith('pad')) ctx.fillText(padNames[key], x + 20, y + 52);
+    else ctx.fillText(key === 'kb1' ? 'Move WASD  Confirm J  Back L' : 'Move Arrows  Confirm Num1  Back Num3', x + 20, y + 52);
+
+    // Slot indicator
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 26px monospace';
+    let label, color;
+    if (slot === 0) { label = 'PLAYER 1'; color = '#ffe070'; }
+    else if (slot === 1) { label = 'PLAYER 2'; color = '#ff60a0'; }
+    else { label = 'UNASSIGNED'; color = '#666'; }
+    ctx.fillStyle = color;
+    ctx.fillText(label, x + cardW - 20, y + 38);
+
+    // Hint
+    ctx.font = '13px monospace';
+    ctx.fillStyle = '#5fd7ff88';
+    ctx.fillText('LEFT = P1   RIGHT = P2   DOWN = unassign', x + cardW - 20, y + 78);
+
+    ctx.textAlign = 'left';
+  }
+
+  // Footer
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 18px monospace';
+  const ready = input.getAssignment('kb1') === 0 || input.getAssignment('kb2') === 0 ||
+                input.getAssignment('pad0') === 0 || input.getAssignment('pad1') === 0;
+  const readyP2 = input.getAssignment('kb1') === 1 || input.getAssignment('kb2') === 1 ||
+                  input.getAssignment('pad0') === 1 || input.getAssignment('pad1') === 1;
+  if (ready && readyP2) {
+    ctx.fillStyle = (menuTick % 60 < 40) ? '#ffe070' : '#888';
+    ctx.fillText('PRESS  JUMP  ON ANY DEVICE TO CONTINUE', canvas.width / 2, 660);
+  } else {
+    ctx.fillStyle = '#ff6060';
+    ctx.fillText('At least one device must be assigned to P1 and one to P2', canvas.width / 2, 660);
+  }
+  ctx.font = '14px monospace';
+  ctx.fillStyle = '#5fd7ff88';
+  ctx.fillText('Back: SHIELD on any device', canvas.width / 2, 686);
+  drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
 
@@ -565,7 +651,7 @@ function handleMenuInput() {
     if (eitherPressed(INPUT.SHIELD)) scene = SCENE.TITLE;
     if (eitherPressed(INPUT.ATTACK)) {
       if (modeCursor === 0) {
-        scene = SCENE.CHAR_SELECT;
+        scene = SCENE.PLAYER_SELECT;
         charLocked = [false, false];
       } else if ((modeCursor === 1 || modeCursor === 2) && netReady) {
         lobbyMode = modeCursor === 1 ? 'host' : 'join';
@@ -583,6 +669,26 @@ function handleMenuInput() {
       scene = SCENE.MODE_SELECT;
       lobbyMode = 'idle';
     }
+  } else if (scene === SCENE.PLAYER_SELECT) {
+    // Each device sets its own assignment by pressing on itself.
+    for (const key of DEVICE_KEYS) {
+      if (input.devicePressed(key, INPUT.LEFT))  input.setAssignment(key, 0);
+      if (input.devicePressed(key, INPUT.RIGHT)) input.setAssignment(key, 1);
+      if (input.devicePressed(key, INPUT.DOWN))  input.setAssignment(key, -1);
+    }
+    // Need at least one device on each player to start.
+    const hasP1 = DEVICE_KEYS.some(k => input.getAssignment(k) === 0);
+    const hasP2 = DEVICE_KEYS.some(k => input.getAssignment(k) === 1);
+    if (hasP1 && hasP2) {
+      // Any device pressing JUMP advances.
+      for (const key of DEVICE_KEYS) {
+        if (input.devicePressed(key, INPUT.JUMP)) { scene = SCENE.CHAR_SELECT; break; }
+      }
+    }
+    // Any device pressing SHIELD goes back.
+    for (const key of DEVICE_KEYS) {
+      if (input.devicePressed(key, INPUT.SHIELD)) { scene = SCENE.MODE_SELECT; break; }
+    }
   } else if (scene === SCENE.CHAR_SELECT) {
     for (let p = 0; p < 2; p++) {
       if (charLocked[p]) {
@@ -592,7 +698,7 @@ function handleMenuInput() {
       if (pressed(p, INPUT.LEFT)) charCursor[p] = (charCursor[p] + ROSTER.length - 1) % ROSTER.length;
       if (pressed(p, INPUT.RIGHT)) charCursor[p] = (charCursor[p] + 1) % ROSTER.length;
       if (pressed(p, INPUT.ATTACK)) { charLocked[p] = true; charSelections[p] = charCursor[p]; }
-      if (pressed(p, INPUT.SHIELD)) scene = SCENE.MODE_SELECT;
+      if (pressed(p, INPUT.SHIELD)) scene = SCENE.PLAYER_SELECT;
     }
     if (charLocked[0] && charLocked[1] && eitherPressed(INPUT.SPECIAL)) {
       scene = SCENE.STAGE_SELECT;
@@ -624,6 +730,7 @@ const loop = new GameLoop(
     if (scene === SCENE.TITLE) drawTitle();
     else if (scene === SCENE.MODE_SELECT) drawModeSelect();
     else if (scene === SCENE.LOBBY) drawLobby();
+    else if (scene === SCENE.PLAYER_SELECT) drawPlayerSelect();
     else if (scene === SCENE.CHAR_SELECT) drawCharSelect();
     else if (scene === SCENE.STAGE_SELECT) drawStageSelect();
     else if (scene === SCENE.MATCH) renderMatch();
