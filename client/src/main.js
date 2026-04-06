@@ -293,7 +293,7 @@ function drawControllerDiagnostic(ctx) {
     if (d.mask & INPUT.JUMP) dirs.push('JMP');
     if (d.mask & INPUT.SHIELD) dirs.push('SHD');
     if (d.mask & INPUT.GRAB) dirs.push('GRB');
-    const ax = `axes[${d.axes.slice(0, 4).join(',')}]`;
+    const ax = `axes[${d.axes.join(',')}]`;
     const btns = d.pressed.length ? `btn[${d.pressed.join(',')}]` : '';
     ctx.fillText(`   ${ax} ${btns} -> ${dirs.join(' ') || '(idle)'}`, 16, y + 12);
   }

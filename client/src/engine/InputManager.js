@@ -121,23 +121,25 @@ export class InputManager {
       return mask;
     }
 
-    // Stick + dpad
-    if (ax < -DEAD) mask |= INPUT.LEFT;
-    if (ax >  DEAD) mask |= INPUT.RIGHT;
-    if (ay < -DEAD) mask |= INPUT.UP;
-    if (ay >  DEAD) mask |= INPUT.DOWN;
+    // D-pad as buttons (standard mapping)
     if (btn(12)) mask |= INPUT.UP;
     if (btn(13)) mask |= INPUT.DOWN;
     if (btn(14)) mask |= INPUT.LEFT;
     if (btn(15)) mask |= INPUT.RIGHT;
-    // Some controllers also report the right analog stick on axes 2/3 (or
-    // 3/4 on PS layouts). Treat strong right-stick input as directional too
-    // so menus respond regardless of which thumbstick the user grabs.
-    const rx = pad.axes[2] || 0, ry = pad.axes[3] || 0;
-    if (rx < -DEAD) mask |= INPUT.LEFT;
-    if (rx >  DEAD) mask |= INPUT.RIGHT;
-    if (ry < -DEAD) mask |= INPUT.UP;
-    if (ry >  DEAD) mask |= INPUT.DOWN;
+    // Analog sticks. Different controllers / browsers report sticks at
+    // different axis indices: most are 0/1 (left) and 2/3 (right), but some
+    // Switch Pro builds expose IMU/gyro on the lower indices and the actual
+    // sticks at 4/5 or 6/7. Skip the hat axis (axes[9]) which we already
+    // parsed above as a d-pad and which would otherwise also be picked up
+    // here. Treat any adjacent (X,Y) pair past the deadzone as directional.
+    for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 8; aIdx += 2) {
+      const x = pad.axes[aIdx] || 0;
+      const y = pad.axes[aIdx + 1] || 0;
+      if (x < -DEAD) mask |= INPUT.LEFT;
+      if (x >  DEAD) mask |= INPUT.RIGHT;
+      if (y < -DEAD) mask |= INPUT.UP;
+      if (y >  DEAD) mask |= INPUT.DOWN;
+    }
 
     if (kind === 'switch-pro' && !standard) {
       // Firefox / non-standard layout for Switch Pro Controller.
