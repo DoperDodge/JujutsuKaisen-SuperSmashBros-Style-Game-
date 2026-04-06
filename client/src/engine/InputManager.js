@@ -206,34 +206,55 @@ export class InputManager {
       return mask;
     }
 
-    // Capture left + right stick raw values from the first two live (X,Y)
-    // axis pairs so callers can read tilt direction (right stick) and detect
-    // smash flicks (left stick deltas). Indices are best-effort: most pads
-    // are 0/1 (left) and 2/3 (right), but we fall back to scanning live pairs.
+    // Capture left + right stick raw values. For non-Switch controllers we
+    // trust the standard layout: axes[0,1] = left stick, axes[2,3] = right
+    // stick. Switch Pro / Joy-Cons sometimes expose IMU/gyro on those axes
+    // so they fall back to the live-pair scanner.
     {
-      const ss = this._padSticks[slotIdx] || (this._padSticks[slotIdx] = { lx: 0, ly: 0, rx: 0, ry: 0, plx: 0, ply: 0, flickX: 0, flickY: 0, flickFrames: 0 });
+      const ss = this._padSticks[slotIdx] || (this._padSticks[slotIdx] = { lx: 0, ly: 0, rx: 0, ry: 0, plx: 0, ply: 0, lxRest: 0, lyRest: 0, lxRestFrames: 0, lyRestFrames: 0, flickX: 0, flickY: 0, flickFrames: 0 });
       ss.plx = ss.lx; ss.ply = ss.ly;
-      let foundLeft = false, foundRight = false;
-      for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 10; aIdx += 2) {
-        if (aIdx === 8) continue;
-        if (!isStickAxis(aIdx) || !isStickAxis(aIdx + 1)) continue;
-        const x = pad.axes[aIdx] || 0;
-        const y = pad.axes[aIdx + 1] || 0;
-        if (!foundLeft) { ss.lx = x; ss.ly = y; foundLeft = true; }
-        else if (!foundRight) { ss.rx = x; ss.ry = y; foundRight = true; break; }
+      if (isSwitch) {
+        // Live-pair scanner (handles IMU/gyro on lower axis indices).
+        let foundLeft = false, foundRight = false;
+        for (let aIdx = 0; aIdx + 1 < pad.axes.length && aIdx < 10; aIdx += 2) {
+          if (aIdx === 8) continue;
+          if (!isStickAxis(aIdx) || !isStickAxis(aIdx + 1)) continue;
+          const x = pad.axes[aIdx] || 0;
+          const y = pad.axes[aIdx + 1] || 0;
+          if (!foundLeft) { ss.lx = x; ss.ly = y; foundLeft = true; }
+          else if (!foundRight) { ss.rx = x; ss.ry = y; foundRight = true; break; }
+        }
+        if (!foundLeft) { ss.lx = 0; ss.ly = 0; }
+        if (!foundRight) { ss.rx = 0; ss.ry = 0; }
+      } else {
+        // Standard layout — direct indices, no calibration needed so the
+        // right stick on Xbox/PS works the moment a controller connects.
+        ss.lx = pad.axes[0] || 0;
+        ss.ly = pad.axes[1] || 0;
+        ss.rx = pad.axes[2] || 0;
+        ss.ry = pad.axes[3] || 0;
       }
-      if (!foundLeft) { ss.lx = 0; ss.ly = 0; }
-      if (!foundRight) { ss.rx = 0; ss.ry = 0; }
-      // Detect a stick flick: per-frame delta on the left stick that crosses
-      // the smash threshold. Latches for ~4 frames so the press of the attack
-      // button can land within the same window.
-      const SMASH_DELTA = 0.55;
+      // Smash flick: detect a rising edge where the left stick crosses from
+      // near-rest to a strong direction within a short window. Triggers in
+      // both axes / both signs equally.
+      const FLICK_HI = 0.65;
+      const FLICK_LO = 0.30;
+      if (Math.abs(ss.lx) < FLICK_LO) ss.lxRestFrames = 4;
+      else if (ss.lxRestFrames > 0) ss.lxRestFrames--;
+      if (Math.abs(ss.ly) < FLICK_LO) ss.lyRestFrames = 4;
+      else if (ss.lyRestFrames > 0) ss.lyRestFrames--;
+      // Rising edge: stick was at rest within the last 4 frames AND is now
+      // past the high threshold AND moved by a meaningful per-frame delta.
       const dx = ss.lx - ss.plx, dy = ss.ly - ss.ply;
-      if (Math.abs(dx) > SMASH_DELTA && Math.abs(ss.lx) > 0.5) {
-        ss.flickX = ss.lx > 0 ? 1 : -1; ss.flickFrames = 6;
+      if (Math.abs(ss.lx) > FLICK_HI && ss.lxRestFrames > 0 && Math.abs(dx) > 0.25) {
+        ss.flickX = ss.lx > 0 ? 1 : -1;
+        ss.flickFrames = 8;
+        ss.lxRestFrames = 0;
       }
-      if (Math.abs(dy) > SMASH_DELTA && Math.abs(ss.ly) > 0.5) {
-        ss.flickY = ss.ly > 0 ? 1 : -1; ss.flickFrames = 6;
+      if (Math.abs(ss.ly) > FLICK_HI && ss.lyRestFrames > 0 && Math.abs(dy) > 0.25) {
+        ss.flickY = ss.ly > 0 ? 1 : -1;
+        ss.flickFrames = 8;
+        ss.lyRestFrames = 0;
       }
       if (ss.flickFrames > 0) ss.flickFrames--;
       else { ss.flickX = 0; ss.flickY = 0; }

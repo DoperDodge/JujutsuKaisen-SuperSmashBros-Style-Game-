@@ -82,9 +82,11 @@ export class TodoFighter extends Fighter {
       neutralspecial: { startup: 8, active: 1, endlag: 6, ceCost: 8, meterKind: 'SPECIAL',
         onStart(f) { f.boogieSwap(f.world); },
       },
-      // Playful Cloud Strike — three-hit combo
-      sidespecial: { startup: 10, active: 30, endlag: 14, ceCost: 15, meterKind: 'SPECIAL',
-        hitbox: { x: 50, y: 50, w: 90, h: 40, damage: 7, knockback: 60, angle: 35 },
+      // Brother's Charge — dashing palm strike. Short startup, low end lag,
+      // and a forward burst of momentum so it actually combos into jab/ftilt.
+      sidespecial: { startup: 6, active: 4, endlag: 8, ceCost: 8, meterKind: 'SPECIAL',
+        onStart(f) { f.vx = f.facing * 9; },
+        hitbox: { x: 44, y: 50, w: 60, h: 32, damage: 9, knockback: 45, angle: 50 },
       },
       // Boogie Woogie Recovery
       upspecial: { startup: 8, active: 4, endlag: 18, ceCost: 10, meterKind: 'SPECIAL',
