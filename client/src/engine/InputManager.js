@@ -78,9 +78,25 @@ export class InputManager {
   // it sits in the bottom face position).
   _maskFromPad(pad, kind) {
     let mask = 0;
+    const DEAD = 0.28; // generous so analog sticks with mild drift still work
     const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
     const btn = (n) => pad.buttons[n] && pad.buttons[n].pressed;
     const standard = pad.mapping === 'standard';
+
+    // Some non-standard layouts (notably Firefox + Switch Pro Controller)
+    // expose the d-pad as a single "hat" axis rather than 4 buttons. The hat
+    // value typically lives at axes[9] and ranges over 8 discrete positions.
+    // We map any close enough value to the corresponding direction.
+    const hat = (typeof pad.axes[9] === 'number') ? pad.axes[9] : null;
+    const hatNear = (target) => hat !== null && Math.abs(hat - target) < 0.15;
+    // Standard hat values used by Firefox: -1=up, -0.71=up-right, -0.43=right,
+    // -0.14=down-right, 0.14=down, 0.43=down-left, 0.71=left, 1.0=up-left.
+    if (hat !== null && hat >= -1.1 && hat <= 1.1 && Math.abs(hat) > 0.05) {
+      if (hatNear(-1) || hatNear(-0.71) || hatNear(1)) mask |= INPUT.UP;
+      if (hatNear(-0.43) || hatNear(-0.71) || hatNear(-0.14)) mask |= INPUT.RIGHT;
+      if (hatNear(0.14) || hatNear(-0.14) || hatNear(0.43)) mask |= INPUT.DOWN;
+      if (hatNear(0.71) || hatNear(0.43) || hatNear(1)) mask |= INPUT.LEFT;
+    }
 
     if (kind === 'joycon-l' || kind === 'joycon-r') {
       // A single Joy-Con held sideways. Stick is the only directional input,
@@ -89,10 +105,10 @@ export class InputManager {
       const sideX = pad.axes[0] || 0;
       const sideY = pad.axes[1] || 0;
       // When held sideways the original Y axis becomes horizontal
-      if (sideY < -0.4) mask |= (kind === 'joycon-l' ? INPUT.LEFT : INPUT.RIGHT);
-      if (sideY >  0.4) mask |= (kind === 'joycon-l' ? INPUT.RIGHT : INPUT.LEFT);
-      if (sideX < -0.4) mask |= (kind === 'joycon-l' ? INPUT.DOWN : INPUT.UP);
-      if (sideX >  0.4) mask |= (kind === 'joycon-l' ? INPUT.UP : INPUT.DOWN);
+      if (sideY < -0.28) mask |= (kind === 'joycon-l' ? INPUT.LEFT : INPUT.RIGHT);
+      if (sideY >  0.28) mask |= (kind === 'joycon-l' ? INPUT.RIGHT : INPUT.LEFT);
+      if (sideX < -0.28) mask |= (kind === 'joycon-l' ? INPUT.DOWN : INPUT.UP);
+      if (sideX >  0.28) mask |= (kind === 'joycon-l' ? INPUT.UP : INPUT.DOWN);
       // Face buttons in sideways layout: 4 buttons in a row.
       // L Joy-Con sideways: arrow buttons; R Joy-Con sideways: A/B/X/Y.
       if (btn(0)) mask |= INPUT.JUMP;
@@ -106,14 +122,22 @@ export class InputManager {
     }
 
     // Stick + dpad
-    if (ax < -0.4) mask |= INPUT.LEFT;
-    if (ax >  0.4) mask |= INPUT.RIGHT;
-    if (ay < -0.4) mask |= INPUT.UP;
-    if (ay >  0.4) mask |= INPUT.DOWN;
+    if (ax < -DEAD) mask |= INPUT.LEFT;
+    if (ax >  DEAD) mask |= INPUT.RIGHT;
+    if (ay < -DEAD) mask |= INPUT.UP;
+    if (ay >  DEAD) mask |= INPUT.DOWN;
     if (btn(12)) mask |= INPUT.UP;
     if (btn(13)) mask |= INPUT.DOWN;
     if (btn(14)) mask |= INPUT.LEFT;
     if (btn(15)) mask |= INPUT.RIGHT;
+    // Some controllers also report the right analog stick on axes 2/3 (or
+    // 3/4 on PS layouts). Treat strong right-stick input as directional too
+    // so menus respond regardless of which thumbstick the user grabs.
+    const rx = pad.axes[2] || 0, ry = pad.axes[3] || 0;
+    if (rx < -DEAD) mask |= INPUT.LEFT;
+    if (rx >  DEAD) mask |= INPUT.RIGHT;
+    if (ry < -DEAD) mask |= INPUT.UP;
+    if (ry >  DEAD) mask |= INPUT.DOWN;
 
     if (kind === 'switch-pro' && !standard) {
       // Firefox / non-standard layout for Switch Pro Controller.
@@ -181,6 +205,34 @@ export class InputManager {
       if (this.buffers[i].length > CONSTANTS.INPUT_BUFFER) this.buffers[i].shift();
       this.lastFrame[i] = mask;
     }
+  }
+
+  // Snapshot of every connected gamepad for the on-screen diagnostic overlay.
+  // Returns one entry per slot with id/kind/axes/pressed buttons/mask.
+  diagnostics() {
+    const out = [];
+    if (!navigator.getGamepads) return out;
+    const pads = navigator.getGamepads();
+    let slot = 0;
+    for (let i = 0; i < pads.length && slot < 2; i++) {
+      const pad = pads[i];
+      if (!pad) continue;
+      const pressed = [];
+      for (let b = 0; b < pad.buttons.length; b++) {
+        if (pad.buttons[b] && pad.buttons[b].pressed) pressed.push(b);
+      }
+      out.push({
+        slot,
+        id: pad.id,
+        kind: this.gamepadKinds[slot],
+        mapping: pad.mapping || 'non-standard',
+        axes: Array.from(pad.axes).map(v => Math.round(v * 100) / 100),
+        pressed,
+        mask: this.gamepadMasks[slot] || 0,
+      });
+      slot++;
+    }
+    return out;
   }
 
   current(p) { return this.buffers[p][this.buffers[p].length - 1] || 0; }
