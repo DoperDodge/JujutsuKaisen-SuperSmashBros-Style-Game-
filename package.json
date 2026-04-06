@@ -1,0 +1,17 @@
+{
+  "name": "jjk-domain-clash",
+  "version": "0.1.0",
+  "description": "Jujutsu Kaisen: Domain Clash — Smash-style platform fighter",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
