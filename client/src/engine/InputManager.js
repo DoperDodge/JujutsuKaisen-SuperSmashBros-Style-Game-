@@ -85,18 +85,24 @@ export class InputManager {
   // it sits in the bottom face position).
   _maskFromPad(pad, kind, slotIdx = 0) {
     let mask = 0;
-    const DEAD = 0.28; // generous so analog sticks with mild drift still work
+    // Switch Pro / Joy-Con sticks tend to report weak raw values and often
+    // have noticeable drift, so they get a much smaller deadzone than the
+    // other controller families.
+    const isSwitch = kind === 'switch-pro' || kind === 'joycon-l' || kind === 'joycon-r';
+    const DEAD = isSwitch ? 0.10 : 0.28;
+    const LIVE_TOL = isSwitch ? 0.40 : 0.15;
     const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
     const btn = (n) => pad.buttons[n] && pad.buttons[n].pressed;
     const standard = pad.mapping === 'standard';
-    // Calibration: an axis is only treated as a directional stick after we've
-    // observed it within ±0.15 of zero at least once. This filters out IMU /
-    // gyro / unused channels that some controllers (notably some Switch Pro
-    // builds) park at constant extreme values like -1.0.
+    // Calibration: an axis is only treated as a directional stick after it
+    // has been observed visiting near its rest range. Real sticks visit zero
+    // (or close to it) the moment you let go; parked IMU / gyro / unused
+    // channels sit at constant extremes forever and stay rejected. Switch
+    // sticks get a wider tolerance so drifty rest positions still calibrate.
     const liveSet = this.padAxisLive[slotIdx] || (this.padAxisLive[slotIdx] = {});
     for (let i = 0; i < pad.axes.length; i++) {
       const v = pad.axes[i];
-      if (typeof v === 'number' && Math.abs(v) < 0.15) liveSet[i] = true;
+      if (typeof v === 'number' && Math.abs(v) < LIVE_TOL) liveSet[i] = true;
     }
     const isStickAxis = (i) => liveSet[i] === true;
 
@@ -122,10 +128,10 @@ export class InputManager {
       const sideX = pad.axes[0] || 0;
       const sideY = pad.axes[1] || 0;
       // When held sideways the original Y axis becomes horizontal
-      if (sideY < -0.28) mask |= (kind === 'joycon-l' ? INPUT.LEFT : INPUT.RIGHT);
-      if (sideY >  0.28) mask |= (kind === 'joycon-l' ? INPUT.RIGHT : INPUT.LEFT);
-      if (sideX < -0.28) mask |= (kind === 'joycon-l' ? INPUT.DOWN : INPUT.UP);
-      if (sideX >  0.28) mask |= (kind === 'joycon-l' ? INPUT.UP : INPUT.DOWN);
+      if (sideY < -0.10) mask |= (kind === 'joycon-l' ? INPUT.LEFT : INPUT.RIGHT);
+      if (sideY >  0.10) mask |= (kind === 'joycon-l' ? INPUT.RIGHT : INPUT.LEFT);
+      if (sideX < -0.10) mask |= (kind === 'joycon-l' ? INPUT.DOWN : INPUT.UP);
+      if (sideX >  0.10) mask |= (kind === 'joycon-l' ? INPUT.UP : INPUT.DOWN);
       // Face buttons in sideways layout: 4 buttons in a row.
       // L Joy-Con sideways: arrow buttons; R Joy-Con sideways: A/B/X/Y.
       if (btn(0)) mask |= INPUT.JUMP;
