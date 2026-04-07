@@ -10,6 +10,7 @@ import { Renderer } from './rendering/Renderer.js';
 import { UIRenderer } from './rendering/UIRenderer.js';
 import { DomainRenderer } from './rendering/DomainRenderer.js';
 import { SpriteSheet } from './rendering/SpriteSheet.js';
+import { SpriteManifest } from './rendering/SpriteManifest.js';
 import { GojoFighter } from './fighters/Gojo.js';
 import { YujiSukunaFighter } from './fighters/YujiSukuna.js';
 import { MahitoFighter } from './fighters/Mahito.js';
@@ -30,6 +31,25 @@ const particles = new ParticleSystem();
 const input = new InputManager();
 const sprites = new SpriteSheet();
 sprites.build();
+// Optional external spritesheet. If /assets/characters.png + characters.json
+// exist, frames from the manifest override the procedural art per-character.
+// Any missing animation or character silently falls back to procedural.
+const spriteManifest = new SpriteManifest();
+spriteManifest.load('assets/characters.json', 'assets/characters.png')
+  .then(ok => {
+    if (ok) console.log('[sprites] manifest loaded');
+    else console.log('[sprites] manifest not found, using procedural art');
+  });
+// Monotonic frame tick used by the manifest renderer to advance animations.
+let spriteFrameTick = 0;
+// Wrapper: try the manifest first, fall back to the procedural atlas. Called
+// everywhere the old `sprites.draw(...)` was called.
+function drawSprite(ctx, character, anim, x, y, facing = 1, scale = 1) {
+  if (spriteManifest.ready && spriteManifest.hasCharacter(character)) {
+    if (spriteManifest.draw(ctx, character, anim, x, y, facing, spriteFrameTick, scale)) return;
+  }
+  sprites.draw(ctx, character, anim, x, y, facing, scale);
+}
 
 // ===== Explicit per-control labels (for menus & overlays) =====
 // Controllers are mapped by physical button position so the same logical
@@ -124,6 +144,7 @@ function createWorld(stageIndex) {
 // ===== Update / Render Match =====
 function updateMatch() {
   world.tick++;
+  spriteFrameTick++;
   if (world.timer > 0) world.timer--;
 
   input.tick();
@@ -183,7 +204,7 @@ function renderMatch() {
       renderer.ctx.stroke();
       renderer.ctx.globalAlpha = 1;
     }
-    sprites.draw(renderer.ctx, f.character, f.anim, f.x, f.y, f.facing);
+    drawSprite(renderer.ctx, f.character, f.anim, f.x, f.y, f.facing);
     if (f.passiveInfinity && f.ce > f.ceMax * 0.25) {
       // Render Infinity field as a layered, shimmering sphere sized to the
       // character. Two animated rings + a translucent fill so it actually
@@ -235,7 +256,7 @@ function renderMatch() {
     }
     if (f.invulnFrames > 0 && f.invulnFrames % 6 < 3) {
       renderer.ctx.globalAlpha = 0.4;
-      sprites.draw(renderer.ctx, f.character, f.anim, f.x, f.y, f.facing);
+      drawSprite(renderer.ctx, f.character, f.anim, f.x, f.y, f.facing);
       renderer.ctx.globalAlpha = 1;
     }
   }
@@ -535,7 +556,7 @@ function drawCharSelect() {
     ctx.strokeStyle = '#5fd7ff44';
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, slotW, slotH);
-    sprites.draw(ctx, key, (menuTick % 60 < 30) ? 'idle' : 'idle2', x + slotW / 2, y + slotH - 30, 1);
+    drawSprite(ctx, key, (menuTick % 60 < 30) ? 'idle' : 'idle2', x + slotW / 2, y + slotH - 30, 1);
     ctx.font = 'bold 22px monospace';
     ctx.fillStyle = stats.palette.accent;
     ctx.fillText(stats.name, x + slotW / 2, y + 32);
@@ -755,6 +776,7 @@ function handleMenuInput() {
 const loop = new GameLoop(
   (tick) => {
     menuTick++;
+    spriteFrameTick++;
     if (scene === SCENE.MATCH) updateMatch();
     else handleMenuInput();
   },
