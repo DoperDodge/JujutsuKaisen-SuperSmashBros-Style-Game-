@@ -558,15 +558,48 @@ export class SpriteSheet {
     for (const key of Object.keys(DRAWERS)) {
       const frames = {};
       for (const poseName in POSES) {
-        const c = document.createElement('canvas');
-        c.width = SPRITE_W * SCALE;
-        c.height = SPRITE_H * SCALE;
-        const ctx = c.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
-        ctx.scale(SCALE, SCALE);
-        DRAWERS[key](ctx, POSES[poseName]);
-        drawPoseFX(ctx, POSES[poseName], key);
-        frames[poseName] = c;
+        // Draw the raw character + FX into an offscreen, then post-process
+        // with a 1-pixel black outline so the silhouette reads cleanly on
+        // any background. The outline is done by copying the body layer
+        // into a black silhouette 4 directions then composing the color
+        // layer on top.
+        const W = SPRITE_W * SCALE, H = SPRITE_H * SCALE;
+        const body = document.createElement('canvas');
+        body.width = W; body.height = H;
+        const bctx = body.getContext('2d');
+        bctx.imageSmoothingEnabled = false;
+        bctx.scale(SCALE, SCALE);
+        DRAWERS[key](bctx, POSES[poseName]);
+
+        // Build a black silhouette of the body layer (source-in preserves
+        // alpha but forces every drawn pixel to black).
+        const silh = document.createElement('canvas');
+        silh.width = W; silh.height = H;
+        const sctx = silh.getContext('2d');
+        sctx.imageSmoothingEnabled = false;
+        sctx.drawImage(body, 0, 0);
+        sctx.globalCompositeOperation = 'source-in';
+        sctx.fillStyle = '#000000';
+        sctx.fillRect(0, 0, W, H);
+
+        // Composite: outline (silhouette shifted 4 directions) then body.
+        const out = document.createElement('canvas');
+        out.width = W; out.height = H;
+        const octx = out.getContext('2d');
+        octx.imageSmoothingEnabled = false;
+        const OFF = SCALE; // 1 source-pixel outline at 2x scale
+        octx.drawImage(silh,  OFF, 0);
+        octx.drawImage(silh, -OFF, 0);
+        octx.drawImage(silh, 0,  OFF);
+        octx.drawImage(silh, 0, -OFF);
+        octx.drawImage(body, 0, 0);
+        // Draw FX on top so energy effects sit above the body+outline.
+        octx.save();
+        octx.scale(SCALE, SCALE);
+        drawPoseFX(octx, POSES[poseName], key);
+        octx.restore();
+
+        frames[poseName] = out;
       }
       this.atlas[key] = frames;
     }
