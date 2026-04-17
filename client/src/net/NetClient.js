@@ -21,6 +21,7 @@ export class NetClient {
     this.onProceedToStage = () => {};
     this.onStartMatch = () => {};
     this.onOpponentLeft = () => {};
+    this.onStateSync = () => {};
   }
   connect() {
     return new Promise((resolve, reject) => {
@@ -42,6 +43,7 @@ export class NetClient {
   sendStageCursor(index) { this._send({ type: 'stage_cursor', index }); }
   sendProceedToStage() { this._send({ type: 'proceed_to_stage' }); }
   sendStartMatch(stage, selections) { this._send({ type: 'start_match', stage, selections }); }
+  sendStateSync(tick, state) { this._send({ type: 'state_sync', tick, state }); }
   _onMessage(e) {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     switch (msg.type) {
@@ -61,6 +63,7 @@ export class NetClient {
       case 'proceed_to_stage': this.onProceedToStage(msg); break;
       case 'start_match':  this.onStartMatch(msg); break;
       case 'opponent_left': this.onOpponentLeft(msg); break;
+      case 'state_sync': this.onStateSync(msg); break;
       case 'error':
         this.onError(msg); break;
     }
