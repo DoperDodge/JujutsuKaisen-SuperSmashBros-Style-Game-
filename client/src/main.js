@@ -336,13 +336,223 @@ function renderMatch() {
 }
 
 // ===== Menu drawing helpers =====
+// Shift a hex color darker (negative amount) or lighter (positive amount).
+// Used to build gradient card backgrounds from the character's primary color.
+function shadeHex(hex, amt) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  if (amt >= 0) {
+    r = Math.min(255, r + ((255 - r) * amt) | 0);
+    g = Math.min(255, g + ((255 - g) * amt) | 0);
+    b = Math.min(255, b + ((255 - b) * amt) | 0);
+  } else {
+    r = Math.max(0, r + (r * amt) | 0);
+    g = Math.max(0, g + (g * amt) | 0);
+    b = Math.max(0, b + (b * amt) | 0);
+  }
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+// Render a segmented pixel stat bar (like a retro RPG HP bar). `pct` is 0..1.
+function drawPixelBar(ctx, x, y, w, h, pct, color) {
+  // Frame
+  ctx.fillStyle = '#0a0d18';
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = '#2a3050';
+  ctx.fillRect(x, y, w, h);
+  // Fill segments (divide into chunks for a pixel look)
+  const segs = 8;
+  const filled = Math.round(segs * Math.max(0, Math.min(1, pct)));
+  const sw = (w - (segs - 1)) / segs;
+  for (let i = 0; i < filled; i++) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x + i * (sw + 1), y, sw, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(x + i * (sw + 1), y, sw, 1);
+  }
+}
+
+// Layered atmospheric background: starfield + drifting cursed-energy motes +
+// distant domain ring. Used by every menu scene for visual continuity.
 function drawBackground(ctx) {
-  // moving starfield
-  for (let i = 0; i < 60; i++) {
-    const x = (i * 137 + menuTick * (1 + (i % 3) * 0.5)) % canvas.width;
-    const y = (i * 73 + i * 11) % canvas.height;
-    ctx.fillStyle = `rgba(95,215,255,${0.04 + (i % 5) * 0.02})`;
+  const W = canvas.width, H = canvas.height;
+  // Deep radial gradient backdrop
+  const grad = ctx.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 900);
+  grad.addColorStop(0, '#0a1028');
+  grad.addColorStop(0.5, '#06081a');
+  grad.addColorStop(1, '#02030a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Far background: distant "Unlimited Void" concentric rings (very subtle)
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 1;
+  for (let r = 60; r < 600; r += 40) {
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, r + (menuTick * 0.3) % 40, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Multi-layer starfield (parallax)
+  // Tiny distant stars
+  for (let i = 0; i < 120; i++) {
+    const x = (i * 137 + menuTick * 0.3) % W;
+    const y = (i * 73 + i * 11) % H;
+    const tw = ((menuTick + i * 7) % 120) / 120;
+    const a = 0.2 + Math.sin(tw * Math.PI * 2) * 0.15;
+    ctx.fillStyle = `rgba(160,180,220,${a})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+  // Medium stars
+  for (let i = 0; i < 40; i++) {
+    const x = (i * 191 + menuTick * 0.6) % W;
+    const y = (i * 113 + i * 17) % H;
+    const tw = ((menuTick + i * 13) % 90) / 90;
+    const a = 0.4 + Math.sin(tw * Math.PI * 2) * 0.3;
+    ctx.fillStyle = `rgba(200,220,255,${a})`;
     ctx.fillRect(x, y, 2, 2);
+  }
+  // Large bright stars with glow crosses
+  const brightStars = [[120, 80], [1100, 160], [240, 500], [960, 560], [600, 120]];
+  for (let i = 0; i < brightStars.length; i++) {
+    const [x, y] = brightStars[i];
+    const tw = ((menuTick + i * 40) % 180) / 180;
+    const a = 0.7 + Math.sin(tw * Math.PI * 2) * 0.3;
+    ctx.fillStyle = `rgba(230,240,255,${a})`;
+    ctx.fillRect(x, y, 2, 2);
+    ctx.fillStyle = `rgba(95,215,255,${a * 0.7})`;
+    ctx.fillRect(x - 2, y, 6, 1);
+    ctx.fillRect(x + 0, y - 2, 1, 6);
+  }
+
+  // Drifting cursed-energy motes (cyan + pink)
+  for (let i = 0; i < 24; i++) {
+    const baseX = (i * 53) % W;
+    const baseY = (i * 91) % H;
+    const driftX = (menuTick * (0.5 + (i % 3) * 0.3)) % W;
+    const x = (baseX + driftX) % W;
+    const y = (baseY + Math.sin((menuTick + i * 20) * 0.02) * 20) % H;
+    const pink = i % 3 === 0;
+    ctx.fillStyle = pink ? 'rgba(255,96,160,0.4)' : 'rgba(95,215,255,0.35)';
+    ctx.fillRect(x, y, 2, 2);
+    ctx.fillStyle = pink ? 'rgba(255,180,210,0.6)' : 'rgba(180,230,255,0.5)';
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  // Bottom haze
+  const hazeGrad = ctx.createLinearGradient(0, H - 120, 0, H);
+  hazeGrad.addColorStop(0, 'rgba(95,20,80,0)');
+  hazeGrad.addColorStop(1, 'rgba(95,20,80,0.25)');
+  ctx.fillStyle = hazeGrad;
+  ctx.fillRect(0, H - 120, W, 120);
+}
+
+// Chunky pixel-block text for the title. Renders a string with thick
+// pixel blocks colored by `fill`, outlined by `outline`, with an optional
+// `glow` halo underneath.
+function drawPixelTitle(ctx, text, cx, cy, blockSize, fill, outline, glow) {
+  const FONT = {
+    J: ['11111', '00010', '00010', '10010', '01100'],
+    U: ['10001', '10001', '10001', '10001', '01110'],
+    T: ['11111', '00100', '00100', '00100', '00100'],
+    S: ['01111', '10000', '01110', '00001', '11110'],
+    K: ['10010', '10100', '11000', '10100', '10010'],
+    A: ['01110', '10001', '11111', '10001', '10001'],
+    I: ['11111', '00100', '00100', '00100', '11111'],
+    E: ['11111', '10000', '11110', '10000', '11111'],
+    N: ['10001', '11001', '10101', '10011', '10001'],
+    D: ['11110', '10001', '10001', '10001', '11110'],
+    O: ['01110', '10001', '10001', '10001', '01110'],
+    M: ['10001', '11011', '10101', '10001', '10001'],
+    C: ['01111', '10000', '10000', '10000', '01111'],
+    L: ['10000', '10000', '10000', '10000', '11111'],
+    H: ['10001', '10001', '11111', '10001', '10001'],
+    R: ['11110', '10001', '11110', '10010', '10001'],
+    P: ['11110', '10001', '11110', '10000', '10000'],
+    W: ['10001', '10001', '10101', '10101', '01010'],
+    Y: ['10001', '10001', '01010', '00100', '00100'],
+    G: ['01111', '10000', '10011', '10001', '01111'],
+    V: ['10001', '10001', '10001', '01010', '00100'],
+    B: ['11110', '10001', '11110', '10001', '11110'],
+    F: ['11111', '10000', '11110', '10000', '10000'],
+    '1': ['00100', '01100', '00100', '00100', '01110'],
+    '2': ['01110', '10001', '00110', '01000', '11111'],
+    ' ': ['00000', '00000', '00000', '00000', '00000'],
+    ':': ['00000', '00100', '00000', '00100', '00000'],
+    '!': ['00100', '00100', '00100', '00000', '00100'],
+  };
+  const chars = text.split('');
+  const charW = 5 * blockSize;
+  const spacing = blockSize;
+  const totalW = chars.length * charW + (chars.length - 1) * spacing;
+  let x = cx - totalW / 2;
+  const y = cy;
+  // Glow pass
+  if (glow) {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = glow;
+    for (let ci = 0; ci < chars.length; ci++) {
+      const g = FONT[chars[ci]] || FONT[' '];
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 5; c++) {
+          if (g[r][c] === '1') {
+            ctx.fillRect(x + ci * (charW + spacing) + c * blockSize - 2,
+                         y + r * blockSize - 2,
+                         blockSize + 4, blockSize + 4);
+          }
+        }
+      }
+    }
+    ctx.restore();
+  }
+  // Outline pass
+  if (outline) {
+    ctx.fillStyle = outline;
+    for (const dir of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      for (let ci = 0; ci < chars.length; ci++) {
+        const g = FONT[chars[ci]] || FONT[' '];
+        for (let r = 0; r < 5; r++) {
+          for (let c = 0; c < 5; c++) {
+            if (g[r][c] === '1') {
+              ctx.fillRect(x + ci * (charW + spacing) + c * blockSize + dir[0] * 2,
+                           y + r * blockSize + dir[1] * 2,
+                           blockSize, blockSize);
+            }
+          }
+        }
+      }
+    }
+  }
+  // Fill pass
+  ctx.fillStyle = fill;
+  for (let ci = 0; ci < chars.length; ci++) {
+    const g = FONT[chars[ci]] || FONT[' '];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        if (g[r][c] === '1') {
+          ctx.fillRect(x + ci * (charW + spacing) + c * blockSize,
+                       y + r * blockSize,
+                       blockSize, blockSize);
+        }
+      }
+    }
+  }
+  // Top-row highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let ci = 0; ci < chars.length; ci++) {
+    const g = FONT[chars[ci]] || FONT[' '];
+    for (let c = 0; c < 5; c++) {
+      if (g[0][c] === '1') {
+        ctx.fillRect(x + ci * (charW + spacing) + c * blockSize,
+                     y, blockSize, Math.max(1, blockSize >> 2));
+      }
+    }
   }
 }
 
@@ -350,27 +560,100 @@ function drawTitle() {
   const ctx = renderer.ctx;
   renderer.clear('#04050a');
   drawBackground(ctx);
+  const W = canvas.width, H = canvas.height;
+
+  // Domain-expansion backdrop ring behind title (giant)
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 3;
+  const titleRing = 220 + Math.sin(menuTick * 0.02) * 10;
+  ctx.beginPath(); ctx.arc(W / 2, 270, titleRing, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 0.08;
+  ctx.beginPath(); ctx.arc(W / 2, 270, titleRing + 30, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W / 2, 270, titleRing + 60, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+
+  // Main title — pixel block text for authentic 128-bit feel
+  drawPixelTitle(ctx, 'JUJUTSU KAISEN', W / 2, 150, 8, '#ffffff', '#1a4080', '#5fd7ff');
+  drawPixelTitle(ctx, 'DOMAIN CLASH', W / 2, 270, 10, '#ff60a0', '#4a0838', '#ff60a0');
+
+  // Decorative energy bars flanking the title
+  ctx.save();
+  ctx.globalAlpha = 0.8;
+  for (let i = 0; i < 3; i++) {
+    const a = 0.7 - i * 0.2;
+    ctx.fillStyle = `rgba(95,215,255,${a})`;
+    ctx.fillRect(80, 200 + i * 6, 260 - i * 20, 3);
+    ctx.fillRect(W - 80 - (260 - i * 20), 200 + i * 6, 260 - i * 20, 3);
+    ctx.fillStyle = `rgba(255,96,160,${a})`;
+    ctx.fillRect(100, 340 + i * 6, 240 - i * 20, 3);
+    ctx.fillRect(W - 100 - (240 - i * 20), 340 + i * 6, 240 - i * 20, 3);
+  }
+  ctx.restore();
+
+  // Subtitle in monospace
   ctx.textAlign = 'center';
-  ctx.font = 'bold 96px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = '#5fd7ff';
-  ctx.shadowBlur = 30;
-  ctx.fillText('JUJUTSU KAISEN', canvas.width / 2, 220);
-  ctx.fillStyle = '#ff60a0';
-  ctx.shadowColor = '#ff60a0';
-  ctx.fillText('DOMAIN CLASH', canvas.width / 2, 320);
-  ctx.shadowBlur = 0;
-  ctx.font = '22px monospace';
-  ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('A Smash-style platform fighter', canvas.width / 2, 360);
-  ctx.font = 'bold 26px monospace';
-  ctx.fillStyle = (menuTick % 60 < 40) ? '#ffe070' : '#666';
-  ctx.fillText('PRESS  J  /  Xbox X  /  PS Square  /  Switch Y', canvas.width / 2, 490);
-  ctx.font = '16px monospace';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillStyle = '#a8c0e0';
+  ctx.fillText('A  SMASH-STYLE  PLATFORM  FIGHTER', W / 2, 400);
+  ctx.font = '14px monospace';
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillText('•  4 FIGHTERS  •  3 STAGES  •  DOMAIN EXPANSIONS  •', W / 2, 425);
+
+  // Press start — blinking pixel-block style
+  const blink = menuTick % 60 < 40;
+  if (blink) {
+    // Button prompt box
+    const pbw = 640, pbh = 60;
+    const pbx = (W - pbw) / 2, pby = 470;
+    ctx.fillStyle = 'rgba(255,224,112,0.12)';
+    ctx.fillRect(pbx, pby, pbw, pbh);
+    ctx.strokeStyle = '#ffe070';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pbx, pby, pbw, pbh);
+    ctx.fillStyle = '#ffe070';
+    ctx.fillRect(pbx, pby, 6, pbh);
+    ctx.fillRect(pbx + pbw - 6, pby, 6, pbh);
+    ctx.font = 'bold 24px monospace';
+    ctx.fillStyle = '#ffe070';
+    ctx.fillText('PRESS  J  /  X  /  SQUARE  /  Y  TO START', W / 2, pby + 38);
+  }
+
+  // Controller hint
+  ctx.font = '14px monospace';
   ctx.fillStyle = '#5fd7ff88';
-  ctx.fillText('Plug in any controller — Xbox, PlayStation, or Nintendo Switch', canvas.width / 2, 520);
+  ctx.fillText('Plug in any controller — Xbox, PlayStation, or Nintendo Switch', W / 2, 555);
+
+  // Small cursed-energy glyphs in the corners (decorative)
+  drawCornerGlyph(ctx, 60, 60, '#5fd7ff');
+  drawCornerGlyph(ctx, W - 60, 60, '#ff60a0');
+  drawCornerGlyph(ctx, 60, H - 140, '#ffe070');
+  drawCornerGlyph(ctx, W - 60, H - 140, '#9aff7a');
+
   drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
+}
+
+// Decorative corner glyph — rotating pixel cross inscribed in a ring. Used
+// to frame the title screen with cursed-energy motifs.
+function drawCornerGlyph(ctx, cx, cy, color) {
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  const r = 22;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, r - 6, 0, Math.PI * 2); ctx.stroke();
+  // Rotating cross
+  ctx.translate(cx, cy);
+  ctx.rotate((menuTick * 0.02) % (Math.PI * 2));
+  ctx.fillStyle = color;
+  ctx.fillRect(-1, -r + 2, 2, r * 2 - 4);
+  ctx.fillRect(-r + 2, -1, r * 2 - 4, 2);
+  // Center dot
+  ctx.fillRect(-2, -2, 4, 4);
+  ctx.restore();
 }
 
 // Live read-out of every connected gamepad. Lets the player verify their
@@ -415,95 +698,230 @@ function drawControllerDiagnostic(ctx) {
 
 function drawModeSelect() {
   const ctx = renderer.ctx;
+  const W = canvas.width;
   renderer.clear('#04050a');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 48px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 20;
-  ctx.fillText('SELECT MODE', canvas.width / 2, 130);
-  ctx.shadowBlur = 0;
+  // Title banner — pixel-block title with decorative end caps
+  ctx.fillStyle = 'rgba(10,14,30,0.7)';
+  ctx.fillRect(W / 2 - 280, 60, 560, 64);
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 280, 60, 560, 64);
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillRect(W / 2 - 280, 60, 10, 64);
+  ctx.fillRect(W / 2 + 270, 60, 10, 64);
+  drawPixelTitle(ctx, 'SELECT MODE', W / 2, 80, 4, '#ffffff', '#1a4080', '#5fd7ff');
 
   const modes = [
-    { title: 'LOCAL VERSUS', sub: 'Two players on this device (keyboard / 2 controllers)' },
-    { title: 'HOST ONLINE',  sub: netReady ? 'Create a room and share the code' : 'Server unavailable' },
-    { title: 'JOIN ONLINE',  sub: netReady ? 'Type a 6-character room code' : 'Server unavailable' },
+    { title: 'LOCAL VERSUS', sub: 'Two players on this device (keyboard / 2 controllers)', accent: '#ffe070' },
+    { title: 'HOST ONLINE',  sub: netReady ? 'Create a room and share the code' : 'Server unavailable', accent: '#5fd7ff' },
+    { title: 'JOIN ONLINE',  sub: netReady ? 'Type a 6-character room code' : 'Server unavailable', accent: '#ff60a0' },
   ];
-  const cardW = 720, cardH = 100;
-  const startY = 220;
+  const cardW = 720, cardH = 110;
+  const startY = 200;
   for (let i = 0; i < modes.length; i++) {
-    const x = (canvas.width - cardW) / 2;
-    const y = startY + i * (cardH + 20);
+    const x = (W - cardW) / 2;
+    const y = startY + i * (cardH + 18);
     const selected = i === modeCursor;
     const disabled = i > 0 && !netReady;
-    ctx.fillStyle = selected ? '#162040' : '#0a0d18';
+    const pulse = selected ? (0.25 + Math.sin(menuTick * 0.08) * 0.1) : 0;
+
+    // Card background (gradient)
+    const cg = ctx.createLinearGradient(x, y, x + cardW, y);
+    if (disabled) { cg.addColorStop(0, '#0c0e14'); cg.addColorStop(1, '#080a10'); }
+    else if (selected) { cg.addColorStop(0, shadeHex(modes[i].accent, -0.7)); cg.addColorStop(1, '#06081a'); }
+    else { cg.addColorStop(0, '#0c1020'); cg.addColorStop(1, '#080a14'); }
+    ctx.fillStyle = cg;
     ctx.fillRect(x, y, cardW, cardH);
-    ctx.strokeStyle = disabled ? '#333' : (selected ? '#ffe070' : '#5fd7ff44');
-    ctx.lineWidth = selected ? 4 : 1;
+
+    // Inner double-stroke frame
+    ctx.strokeStyle = disabled ? '#2a2a30' : (selected ? modes[i].accent : '#2a3050');
+    ctx.lineWidth = selected ? 3 : 1;
     ctx.strokeRect(x, y, cardW, cardH);
+    if (selected) {
+      ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
+      ctx.strokeRect(x - 4, y - 4, cardW + 8, cardH + 8);
+    }
+
+    // Left accent bar
+    ctx.fillStyle = disabled ? '#2a2a30' : modes[i].accent;
+    ctx.fillRect(x, y, 8, cardH);
+    ctx.fillRect(x + cardW - 8, y, 8, cardH);
+    // Corner pixel notches (selected only)
+    if (selected) {
+      ctx.fillStyle = modes[i].accent;
+      ctx.fillRect(x + 10, y + 6, 14, 2); ctx.fillRect(x + 10, y + 6, 2, 14);
+      ctx.fillRect(x + cardW - 24, y + 6, 14, 2); ctx.fillRect(x + cardW - 12, y + 6, 2, 14);
+      ctx.fillRect(x + 10, y + cardH - 8, 14, 2); ctx.fillRect(x + 10, y + cardH - 20, 2, 14);
+      ctx.fillRect(x + cardW - 24, y + cardH - 8, 14, 2); ctx.fillRect(x + cardW - 12, y + cardH - 20, 2, 14);
+    }
+
+    // Chevron cursor on left side (animated)
+    if (selected) {
+      const sh = Math.sin(menuTick * 0.12) * 4;
+      ctx.fillStyle = modes[i].accent;
+      const cx = x - 22 + sh, cy = y + cardH / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 14, cy); ctx.lineTo(cx, cy + 10);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillRect(cx, cy - 10, 3, 20);
+    }
+
+    // Title + sub
     ctx.font = 'bold 28px monospace';
     ctx.fillStyle = disabled ? '#444' : (selected ? '#ffe070' : '#fff');
-    ctx.fillText(modes[i].title, canvas.width / 2, y + 40);
-    ctx.font = '16px monospace';
+    ctx.shadowColor = selected ? modes[i].accent : 'transparent';
+    ctx.shadowBlur = selected ? 12 : 0;
+    ctx.fillText(modes[i].title, W / 2, y + 44);
+    ctx.shadowBlur = 0;
+    ctx.font = '15px monospace';
     ctx.fillStyle = disabled ? '#333' : '#a0a8c0';
-    ctx.fillText(modes[i].sub, canvas.width / 2, y + 70);
+    ctx.fillText(modes[i].sub, W / 2, y + 72);
+
+    // Tiny mode glyph on right side
+    if (!disabled) {
+      const gx = x + cardW - 44, gy = y + cardH / 2;
+      ctx.strokeStyle = modes[i].accent;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = selected ? 0.9 : 0.5;
+      ctx.beginPath(); ctx.arc(gx, gy, 12, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(gx, gy, 6, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = modes[i].accent;
+      ctx.fillRect(gx - 1, gy - 1, 2, 2);
+    }
   }
-  ctx.font = '15px monospace';
+
+  // Footer hint
+  ctx.font = '14px monospace';
   ctx.fillStyle = '#5fd7ff88';
-  ctx.fillText('UP/DOWN to choose  •  Confirm: J / Xbox X / PS Square / Switch Y', canvas.width / 2, 670);
-  ctx.fillText('Back: L / R-shoulder', canvas.width / 2, 690);
+  ctx.fillText('UP/DOWN to choose  •  Confirm: J / Xbox X / PS Square / Switch Y', W / 2, 640);
+  ctx.fillText('Back: SHIELD / L-shoulder', W / 2, 660);
   drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
 
 function drawLobby() {
   const ctx = renderer.ctx;
+  const W = canvas.width;
   renderer.clear('#04050a');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 48px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 20;
-  ctx.fillText(lobbyMode === 'host' ? 'HOSTING ROOM' : 'JOIN ROOM', canvas.width / 2, 130);
-  ctx.shadowBlur = 0;
 
-  // Big code box
-  const boxW = 560, boxH = 180;
-  const x = (canvas.width - boxW) / 2;
-  const y = 220;
+  // Title banner
+  const titleText = lobbyMode === 'host' ? 'HOSTING ROOM' : 'JOIN ROOM';
+  ctx.fillStyle = 'rgba(10,14,30,0.7)';
+  ctx.fillRect(W / 2 - 300, 60, 600, 64);
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 300, 60, 600, 64);
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillRect(W / 2 - 300, 60, 10, 64);
+  ctx.fillRect(W / 2 + 290, 60, 10, 64);
+  drawPixelTitle(ctx, titleText, W / 2, 80, 4, '#ffffff', '#1a4080', '#5fd7ff');
+
+  // Code box — pixel-framed with chunky per-digit tiles
+  const boxW = 640, boxH = 220;
+  const x = (W - boxW) / 2;
+  const y = 210;
+  // Outer frame with inset
   ctx.fillStyle = '#0a0d18';
+  ctx.fillRect(x, y, boxW, boxH);
+  const frameGrad = ctx.createLinearGradient(x, y, x, y + boxH);
+  frameGrad.addColorStop(0, 'rgba(95,215,255,0.15)');
+  frameGrad.addColorStop(1, 'rgba(255,96,160,0.10)');
+  ctx.fillStyle = frameGrad;
   ctx.fillRect(x, y, boxW, boxH);
   ctx.strokeStyle = '#5fd7ff';
   ctx.lineWidth = 3;
   ctx.strokeRect(x, y, boxW, boxH);
-
-  ctx.font = 'bold 80px monospace';
+  // Corner brackets (L-shapes)
   ctx.fillStyle = '#ffe070';
-  ctx.shadowColor = '#ffe070'; ctx.shadowBlur = 20;
-  let displayCode;
-  if (lobbyMode === 'host') {
-    displayCode = lobbyCode || '------';
-  } else {
-    displayCode = (lobbyJoinInput + '______').slice(0, 6).split('').join(' ');
-  }
-  ctx.fillText(displayCode, canvas.width / 2, y + 110);
-  ctx.shadowBlur = 0;
+  const cbs = 18;
+  ctx.fillRect(x - 2, y - 2, cbs, 3); ctx.fillRect(x - 2, y - 2, 3, cbs);
+  ctx.fillRect(x + boxW - cbs + 2, y - 2, cbs, 3); ctx.fillRect(x + boxW - 1, y - 2, 3, cbs);
+  ctx.fillRect(x - 2, y + boxH - 1, cbs, 3); ctx.fillRect(x - 2, y + boxH - cbs + 2, 3, cbs);
+  ctx.fillRect(x + boxW - cbs + 2, y + boxH - 1, cbs, 3); ctx.fillRect(x + boxW - 1, y + boxH - cbs + 2, 3, cbs);
 
-  ctx.font = '18px monospace';
+  // Build raw 6-char display code
+  let rawCode;
+  if (lobbyMode === 'host') {
+    rawCode = (lobbyCode || '------').padEnd(6, '-').slice(0, 6);
+  } else {
+    rawCode = (lobbyJoinInput + '______').slice(0, 6);
+  }
+  // Digit tiles
+  const tileW = 72, tileH = 108, tileGap = 10;
+  const tilesTotal = tileW * 6 + tileGap * 5;
+  const tx0 = x + (boxW - tilesTotal) / 2;
+  const ty = y + 40;
+  for (let i = 0; i < 6; i++) {
+    const tx = tx0 + i * (tileW + tileGap);
+    const ch = rawCode[i];
+    const filled = ch !== '_' && ch !== '-';
+    const cursor = lobbyMode === 'join' && i === lobbyJoinInput.length;
+    // Tile shadow
+    ctx.fillStyle = '#04060c';
+    ctx.fillRect(tx + 3, ty + 3, tileW, tileH);
+    // Tile body
+    const tg = ctx.createLinearGradient(tx, ty, tx, ty + tileH);
+    tg.addColorStop(0, filled ? '#2a2030' : '#12161f');
+    tg.addColorStop(1, '#05070c');
+    ctx.fillStyle = tg;
+    ctx.fillRect(tx, ty, tileW, tileH);
+    // Inner frame
+    ctx.strokeStyle = filled ? '#ffe070' : '#2a3050';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx + 2, ty + 2, tileW - 4, tileH - 4);
+    // Top highlight line
+    ctx.fillStyle = filled ? 'rgba(255,224,112,0.25)' : 'rgba(95,215,255,0.15)';
+    ctx.fillRect(tx + 2, ty + 2, tileW - 4, 3);
+    // Digit
+    if (filled) {
+      ctx.font = 'bold 64px monospace';
+      ctx.fillStyle = '#ffe070';
+      ctx.shadowColor = '#ffe070'; ctx.shadowBlur = 18;
+      ctx.fillText(ch, tx + tileW / 2, ty + tileH - 28);
+      ctx.shadowBlur = 0;
+    }
+    // Blinking cursor slot (join mode)
+    if (cursor && menuTick % 40 < 22) {
+      ctx.fillStyle = '#5fd7ff';
+      ctx.fillRect(tx + tileW / 2 - 14, ty + tileH - 22, 28, 4);
+    }
+  }
+
+  // Flavor text under tiles
+  ctx.font = '16px monospace';
   ctx.fillStyle = '#a0a8c0';
   if (lobbyMode === 'host') {
-    ctx.fillText('Share this code with your opponent', canvas.width / 2, y + 150);
+    ctx.fillText('Share this code with your opponent', W / 2, y + boxH - 18);
   } else {
-    ctx.fillText('Type the code on your keyboard, then press ENTER', canvas.width / 2, y + 150);
+    ctx.fillText('Type the code on your keyboard, then press ENTER', W / 2, y + boxH - 18);
   }
 
-  ctx.font = '18px monospace';
-  ctx.fillStyle = '#5fd7ff';
-  ctx.fillText(lobbyStatus, canvas.width / 2, 460);
-
+  // Status banner
+  const sbw = 520, sbh = 46;
+  const sbx = (W - sbw) / 2, sby = 490;
+  ctx.fillStyle = 'rgba(10,14,30,0.8)';
+  ctx.fillRect(sbx, sby, sbw, sbh);
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sbx, sby, sbw, sbh);
+  // Animated activity dot
+  const pulseA = 0.5 + Math.sin(menuTick * 0.15) * 0.4;
+  ctx.fillStyle = `rgba(95,215,255,${pulseA})`;
+  ctx.fillRect(sbx + 16, sby + sbh / 2 - 3, 6, 6);
   ctx.font = '16px monospace';
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillText(lobbyStatus, W / 2 + 12, sby + 29);
+
+  // Footer
+  ctx.font = '14px monospace';
   ctx.fillStyle = '#5fd7ff88';
-  ctx.fillText('SHIELD / BACKSPACE to return', canvas.width / 2, 680);
+  ctx.fillText('SHIELD / BACKSPACE to return', W / 2, 670);
   ctx.textAlign = 'left';
 }
 
@@ -519,20 +937,32 @@ const DEVICE_LABELS = {
 
 function drawPlayerSelect() {
   const ctx = renderer.ctx;
+  const W = canvas.width;
   renderer.clear('#04050a');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 44px monospace';
-  ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
-  ctx.fillText('ASSIGN CONTROLS', canvas.width / 2, 90);
-  ctx.shadowBlur = 0;
-  ctx.font = '18px monospace';
-  ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('Each device picks its player slot. They will not control the same player.', canvas.width / 2, 124);
 
-  const cardW = 760, cardH = 96;
-  const startY = 170;
+  // Title banner
+  ctx.fillStyle = 'rgba(10,14,30,0.7)';
+  ctx.fillRect(W / 2 - 320, 30, 640, 56);
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 320, 30, 640, 56);
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillRect(W / 2 - 320, 30, 10, 56);
+  ctx.fillRect(W / 2 + 310, 30, 10, 56);
+  ctx.font = 'bold 32px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 14;
+  ctx.fillText('ASSIGN CONTROLS', W / 2, 68);
+  ctx.shadowBlur = 0;
+
+  ctx.font = '15px monospace';
+  ctx.fillStyle = '#a0a8c0';
+  ctx.fillText('Each device picks its player slot. They will not control the same player.', W / 2, 108);
+
+  const cardW = 780, cardH = 104;
+  const startY = 140;
   const diag = input.diagnostics();
   const padNames = { pad0: '(none connected)', pad1: '(none connected)' };
   for (const d of diag) {
@@ -541,110 +971,258 @@ function drawPlayerSelect() {
 
   for (let i = 0; i < DEVICE_KEYS.length; i++) {
     const key = DEVICE_KEYS[i];
-    const x = (canvas.width - cardW) / 2;
-    const y = startY + i * (cardH + 14);
+    const x = (W - cardW) / 2;
+    const y = startY + i * (cardH + 16);
     const slot = input.getAssignment(key);
-    ctx.fillStyle = '#0a0d18';
+    const accent = slot === 0 ? '#ffe070' : (slot === 1 ? '#ff60a0' : '#5fd7ff');
+    const assigned = slot !== -1;
+
+    // Card gradient
+    const cg = ctx.createLinearGradient(x, y, x + cardW, y);
+    cg.addColorStop(0, assigned ? shadeHex(accent, -0.75) : '#0a0d18');
+    cg.addColorStop(1, '#05060c');
+    ctx.fillStyle = cg;
     ctx.fillRect(x, y, cardW, cardH);
-    ctx.strokeStyle = slot === 0 ? '#ffe070' : (slot === 1 ? '#ff60a0' : '#5fd7ff44');
-    ctx.lineWidth = slot === -1 ? 1 : 4;
+    // Frame
+    ctx.strokeStyle = assigned ? accent : '#2a3050';
+    ctx.lineWidth = assigned ? 3 : 1;
     ctx.strokeRect(x, y, cardW, cardH);
+    // Left accent bar
+    ctx.fillStyle = accent + (assigned ? '' : '55');
+    ctx.fillRect(x, y, 6, cardH);
+
+    // Device icon (pixel glyph for keyboard / gamepad)
+    const ix = x + 30, iy = y + cardH / 2;
+    ctx.fillStyle = assigned ? accent : '#5fd7ff';
+    if (key === 'kb1') {
+      // Pixel keyboard — grid of keys
+      ctx.fillRect(ix - 20, iy - 12, 40, 24);
+      ctx.fillStyle = '#0a0d18';
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 5; c++)
+          ctx.fillRect(ix - 19 + c * 8, iy - 11 + r * 8, 6, 6);
+    } else {
+      // Pixel gamepad — squared body with two thumbsticks
+      ctx.fillRect(ix - 22, iy - 8, 44, 18);
+      ctx.fillRect(ix - 18, iy - 12, 36, 24);
+      ctx.fillStyle = '#0a0d18';
+      ctx.fillRect(ix - 14, iy - 4, 6, 6);
+      ctx.fillRect(ix + 8, iy - 4, 6, 6);
+      ctx.fillStyle = assigned ? '#ffffff' : '#9aff7a';
+      ctx.fillRect(ix - 12, iy - 2, 2, 2);
+      ctx.fillRect(ix + 10, iy - 2, 2, 2);
+    }
 
     ctx.textAlign = 'left';
-    ctx.font = 'bold 20px monospace';
+    ctx.font = 'bold 22px monospace';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(DEVICE_LABELS[key], x + 20, y + 32);
+    ctx.fillText(DEVICE_LABELS[key], x + 70, y + 36);
     ctx.font = '13px monospace';
     ctx.fillStyle = '#a0a8c0';
-    if (key.startsWith('pad')) ctx.fillText(padNames[key], x + 20, y + 52);
-    else ctx.fillText('Move WASD  Attack J  Special K  Jump Space  Shield L', x + 20, y + 52);
+    if (key.startsWith('pad')) ctx.fillText(padNames[key], x + 70, y + 58);
+    else ctx.fillText('Move WASD  Attack J  Special K  Jump Space  Shield L', x + 70, y + 58);
 
-    // Slot indicator
-    ctx.textAlign = 'right';
-    ctx.font = 'bold 26px monospace';
-    let label, color;
-    if (slot === 0) { label = 'PLAYER 1'; color = '#ffe070'; }
-    else if (slot === 1) { label = 'PLAYER 2'; color = '#ff60a0'; }
-    else { label = 'UNASSIGNED'; color = '#666'; }
-    ctx.fillStyle = color;
-    ctx.fillText(label, x + cardW - 20, y + 38);
-
-    // Hint
-    ctx.font = '13px monospace';
+    // Hint strip
+    ctx.font = '12px monospace';
     ctx.fillStyle = '#5fd7ff88';
-    ctx.fillText('LEFT = P1   RIGHT = P2   DOWN = unassign', x + cardW - 20, y + 78);
+    ctx.fillText('LEFT → P1    RIGHT → P2    DOWN → unassign', x + 70, y + 82);
+
+    // Slot badge on right
+    const badgeW = 160, badgeH = cardH - 20;
+    const bx = x + cardW - badgeW - 12, by = y + 10;
+    ctx.fillStyle = assigned ? accent : '#1a1e28';
+    ctx.fillRect(bx, by, badgeW, badgeH);
+    ctx.strokeStyle = assigned ? shadeHex(accent, 0.4) : '#2a3050';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, badgeW, badgeH);
+    // Badge inner fill
+    if (assigned) {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(bx + 6, by + 6, badgeW - 12, badgeH - 12);
+    }
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 24px monospace';
+    let label;
+    if (slot === 0) label = 'PLAYER 1';
+    else if (slot === 1) label = 'PLAYER 2';
+    else label = 'UNASSIGNED';
+    ctx.fillStyle = assigned ? '#ffffff' : '#666';
+    ctx.shadowColor = assigned ? accent : 'transparent';
+    ctx.shadowBlur = assigned ? 12 : 0;
+    ctx.fillText(label, bx + badgeW / 2, by + badgeH / 2 + 8);
+    ctx.shadowBlur = 0;
 
     ctx.textAlign = 'left';
   }
 
   // Footer
   ctx.textAlign = 'center';
-  ctx.font = 'bold 18px monospace';
-  const ready = DEVICE_KEYS.some(k => input.getAssignment(k) === 0);
-  const readyP2 = DEVICE_KEYS.some(k => input.getAssignment(k) === 1);
-  if (ready && readyP2) {
-    ctx.fillStyle = (menuTick % 60 < 40) ? '#ffe070' : '#888';
-    ctx.fillText('PRESS  JUMP  ON ANY DEVICE TO CONTINUE', canvas.width / 2, 660);
+  const hasP1 = DEVICE_KEYS.some(k => input.getAssignment(k) === 0);
+  const hasP2 = DEVICE_KEYS.some(k => input.getAssignment(k) === 1);
+  if (hasP1 && hasP2) {
+    const blink = menuTick % 60 < 40;
+    if (blink) {
+      const pbw = 620, pbh = 50;
+      const pbx = (W - pbw) / 2, pby = 480;
+      ctx.fillStyle = 'rgba(255,224,112,0.12)';
+      ctx.fillRect(pbx, pby, pbw, pbh);
+      ctx.strokeStyle = '#ffe070';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(pbx, pby, pbw, pbh);
+      ctx.fillStyle = '#ffe070';
+      ctx.fillRect(pbx, pby, 5, pbh);
+      ctx.fillRect(pbx + pbw - 5, pby, 5, pbh);
+      ctx.font = 'bold 20px monospace';
+      ctx.fillStyle = '#ffe070';
+      ctx.fillText('PRESS JUMP ON ANY DEVICE TO CONTINUE', W / 2, pby + 33);
+    }
   } else {
+    ctx.font = 'bold 17px monospace';
     ctx.fillStyle = '#ff6060';
-    ctx.fillText('At least one device must be assigned to P1 and one to P2', canvas.width / 2, 660);
+    ctx.fillText('At least one device must be assigned to P1 and one to P2', W / 2, 500);
   }
-  ctx.font = '14px monospace';
+  ctx.font = '13px monospace';
   ctx.fillStyle = '#5fd7ff88';
-  ctx.fillText('Back: SHIELD on any device', canvas.width / 2, 686);
+  ctx.fillText('Back: SHIELD on any device', W / 2, 555);
   drawControllerDiagnostic(ctx);
   ctx.textAlign = 'left';
 }
 
 function drawCharSelect() {
   const ctx = renderer.ctx;
+  const W = canvas.width;
   renderer.clear('#06080f');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 44px monospace';
+  // Title banner with decorative bars
+  ctx.fillStyle = 'rgba(10,14,30,0.7)';
+  ctx.fillRect(W / 2 - 320, 40, 640, 56);
+  ctx.strokeStyle = '#5fd7ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 320, 40, 640, 56);
+  ctx.fillStyle = '#5fd7ff';
+  ctx.fillRect(W / 2 - 320, 40, 10, 56);
+  ctx.fillRect(W / 2 + 310, 40, 10, 56);
+  ctx.font = 'bold 36px monospace';
   ctx.fillStyle = '#ffffff';
   ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
-  ctx.fillText('CHARACTER SELECT', canvas.width / 2, 80);
+  ctx.fillText('CHARACTER SELECT', W / 2, 80);
   ctx.shadowBlur = 0;
   if (isOnline) {
-    ctx.font = '16px monospace';
+    ctx.font = '14px monospace';
     ctx.fillStyle = '#5fd7ff';
     const youLabel = `YOU = P${net.localSlot + 1}`;
     const roleLabel = net.localSlot === 0 ? '(host — picks stage)' : '(guest)';
-    ctx.fillText(`ONLINE  ${lobbyCode}  •  ${youLabel} ${roleLabel}`, canvas.width / 2, 108);
+    ctx.fillText(`ONLINE  ${lobbyCode}  •  ${youLabel} ${roleLabel}`, W / 2, 112);
   }
 
-  const slotW = 240, slotH = 280;
-  const startX = (canvas.width - slotW * ROSTER.length - 20 * (ROSTER.length - 1)) / 2;
+  const slotW = 240, slotH = 300;
+  const startX = (W - slotW * ROSTER.length - 20 * (ROSTER.length - 1)) / 2;
   for (let i = 0; i < ROSTER.length; i++) {
     const key = ROSTER[i];
     const stats = FIGHTER_STATS[key];
     const x = startX + i * (slotW + 20);
     const y = 140;
-    ctx.fillStyle = '#0e1220';
+    // Card backdrop — two-tone gradient keyed to character color
+    const cardGrad = ctx.createLinearGradient(x, y, x, y + slotH);
+    cardGrad.addColorStop(0, shadeHex(stats.palette.primary, 0.2));
+    cardGrad.addColorStop(1, '#06080f');
+    ctx.fillStyle = cardGrad;
     ctx.fillRect(x, y, slotW, slotH);
-    ctx.strokeStyle = '#5fd7ff44';
+    // Inner border
+    ctx.strokeStyle = '#2a3050';
     ctx.lineWidth = 1;
-    ctx.strokeRect(x, y, slotW, slotH);
-    drawSprite(ctx, key, (menuTick % 60 < 30) ? 'idle' : 'idle2', x + slotW / 2, y + slotH - 30, 1);
-    ctx.font = 'bold 22px monospace';
+    ctx.strokeRect(x + 4, y + 4, slotW - 8, slotH - 8);
+    // Portrait panel (darker area where sprite lives)
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x + 8, y + 60, slotW - 16, slotH - 100);
+    // Portrait accent corners
     ctx.fillStyle = stats.palette.accent;
-    ctx.fillText(stats.name, x + slotW / 2, y + 32);
-    ctx.font = '13px monospace';
+    ctx.fillRect(x + 8, y + 60, 10, 2);
+    ctx.fillRect(x + 8, y + 60, 2, 10);
+    ctx.fillRect(x + slotW - 18, y + 60, 10, 2);
+    ctx.fillRect(x + slotW - 10, y + 60, 2, 10);
+    ctx.fillRect(x + 8, y + slotH - 42, 2, 10);
+    ctx.fillRect(x + 8, y + slotH - 34, 10, 2);
+    ctx.fillRect(x + slotW - 10, y + slotH - 42, 2, 10);
+    ctx.fillRect(x + slotW - 18, y + slotH - 34, 10, 2);
+    // Cursed-energy ground circle beneath character
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = stats.palette.accent;
+    ctx.beginPath();
+    ctx.ellipse(x + slotW / 2, y + slotH - 50, 48, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(x + slotW / 2, y + slotH - 50, 32, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Character sprite (idle animation)
+    drawSprite(ctx, key, (menuTick % 60 < 30) ? 'idle' : 'idle2', x + slotW / 2, y + slotH - 46, 1);
+    // Name banner at top of card
+    ctx.fillStyle = shadeHex(stats.palette.primary, -0.3);
+    ctx.fillRect(x + 8, y + 12, slotW - 16, 36);
+    ctx.fillStyle = stats.palette.accent;
+    ctx.fillRect(x + 8, y + 12, slotW - 16, 2);
+    ctx.fillRect(x + 8, y + 46, slotW - 16, 2);
+    ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = stats.palette.accent;
+    ctx.shadowColor = stats.palette.accent; ctx.shadowBlur = 6;
+    ctx.fillText(stats.name.toUpperCase(), x + slotW / 2, y + 36);
+    ctx.shadowBlur = 0;
+    // Stats at bottom of card (pixel bars)
+    const statsY = y + slotH - 26;
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#a0a8c0';
-    ctx.fillText(`Weight ${stats.weight}  Run ${stats.runSpeed}`, x + slotW / 2, y + 52);
+    ctx.fillText('WT', x + 16, statsY);
+    ctx.fillText('SPD', x + 94, statsY);
+    ctx.fillText('CE', x + 172, statsY);
+    // Pixel bars
+    drawPixelBar(ctx, x + 34, statsY - 7, 50, 6, Math.min(1, stats.weight / 120), stats.palette.accent);
+    drawPixelBar(ctx, x + 122, statsY - 7, 42, 6, Math.min(1, stats.runSpeed / 2.5), stats.palette.accent);
+    drawPixelBar(ctx, x + 194, statsY - 7, 38, 6, Math.min(1, stats.ceMax / 120), stats.palette.accent);
+    ctx.textAlign = 'center';
   }
-  // Cursors
+  // Cursors — thick animated pixel frames
   for (let p = 0; p < 2; p++) {
     const i = charCursor[p];
     const x = startX + i * (slotW + 20);
     const y = 140;
-    ctx.strokeStyle = p === 0 ? '#ffe070' : '#ff60a0';
-    ctx.lineWidth = charLocked[p] ? 7 : 4;
-    ctx.strokeRect(x - 4 + p * 4, y - 4 + p * 4, slotW + 8, slotH + 8);
-    ctx.font = 'bold 16px monospace';
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.fillText(charLocked[p] ? `P${p + 1} READY` : `P${p + 1}`, x + slotW / 2, y - 12);
+    const color = p === 0 ? '#ffe070' : '#ff60a0';
+    const thick = charLocked[p] ? 6 : 4;
+    const pulse = Math.sin((menuTick + p * 30) * 0.1) * 2;
+    const off = -6 + p * 6 + pulse * 0;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thick;
+    ctx.strokeRect(x + off, y + off, slotW - off * 2, slotH - off * 2);
+    // Corner accents (L-shapes at each corner)
+    ctx.fillStyle = color;
+    const cs = 14; // corner size
+    ctx.fillRect(x + off - 4, y + off - 4, cs, 4);
+    ctx.fillRect(x + off - 4, y + off - 4, 4, cs);
+    ctx.fillRect(x + slotW - off - cs + 4, y + off - 4, cs, 4);
+    ctx.fillRect(x + slotW - off, y + off - 4, 4, cs);
+    ctx.fillRect(x + off - 4, y + slotH - off, cs, 4);
+    ctx.fillRect(x + off - 4, y + slotH - off - cs + 4, 4, cs);
+    ctx.fillRect(x + slotW - off - cs + 4, y + slotH - off, cs, 4);
+    ctx.fillRect(x + slotW - off, y + slotH - off - cs + 4, 4, cs);
+    // Player label banner
+    const plX = x + slotW / 2, plY = y - 24;
+    ctx.fillStyle = color;
+    ctx.fillRect(plX - 60, plY - 12, 120, 22);
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(charLocked[p] ? `P${p + 1} READY!` : `P${p + 1}`, plX, plY + 4);
+    // "READY" bright flash effect
+    if (charLocked[p]) {
+      ctx.save();
+      ctx.globalAlpha = 0.15 + (menuTick % 30) / 60;
+      ctx.fillStyle = color;
+      ctx.fillRect(x + off, y + off, slotW - off * 2, slotH - off * 2);
+      ctx.restore();
+    }
   }
 
   // Explicit binds
@@ -666,74 +1244,220 @@ function drawCharSelect() {
 
 function drawStageSelect() {
   const ctx = renderer.ctx;
+  const W = canvas.width;
   renderer.clear('#06080f');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 44px monospace';
+
+  // Title banner
+  ctx.fillStyle = 'rgba(10,14,30,0.7)';
+  ctx.fillRect(W / 2 - 280, 40, 560, 56);
+  ctx.strokeStyle = '#ffe070';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 280, 40, 560, 56);
+  ctx.fillStyle = '#ffe070';
+  ctx.fillRect(W / 2 - 280, 40, 10, 56);
+  ctx.fillRect(W / 2 + 270, 40, 10, 56);
+  ctx.font = 'bold 36px monospace';
   ctx.fillStyle = '#ffffff';
-  ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
-  ctx.fillText('STAGE SELECT', canvas.width / 2, 80);
+  ctx.shadowColor = '#ffe070'; ctx.shadowBlur = 16;
+  ctx.fillText('STAGE SELECT', W / 2, 80);
   ctx.shadowBlur = 0;
+
   if (isOnline) {
-    ctx.font = '16px monospace';
+    ctx.font = '14px monospace';
     ctx.fillStyle = '#5fd7ff';
     const hostLine = net.localSlot === 0
       ? 'ONLINE — you are the host. Pick the stage and press ATTACK to start.'
       : 'ONLINE — waiting for host to pick the stage...';
-    ctx.fillText(hostLine, canvas.width / 2, 108);
+    ctx.fillText(hostLine, W / 2, 112);
   }
 
   const slotW = 360, slotH = 240;
-  const startX = (canvas.width - slotW * 3 - 40) / 2;
+  const startX = (W - slotW * 3 - 40) / 2;
+  const stageBlurb = [
+    'Moonlit training grounds.',
+    'Underground metro, train hazard.',
+    'Destroyed skyline, no platforms.',
+  ];
   for (let i = 0; i < 3; i++) {
     const x = startX + i * (slotW + 20);
     const y = 160;
-    // Stage preview thumbnails
-    ctx.fillStyle = '#0e1220';
+    // Card backdrop
+    ctx.fillStyle = '#0a0d18';
     ctx.fillRect(x, y, slotW, slotH);
-    // Mini-rendered stage backdrop
+    // Mini-rendered stage preview
     ctx.save();
-    ctx.beginPath(); ctx.rect(x, y, slotW, slotH); ctx.clip();
+    ctx.beginPath(); ctx.rect(x + 4, y + 4, slotW - 8, slotH - 8); ctx.clip();
     const tmpStage = new (STAGES[i])();
-    ctx.translate(x, y);
-    ctx.scale(slotW / 1280, slotH / 720);
+    ctx.translate(x + 4, y + 4);
+    ctx.scale((slotW - 8) / 1280, (slotH - 8) / 720);
     tmpStage.background(ctx, 1280, 720);
-    // ground line
+    // Draw ground + platforms
     ctx.fillStyle = '#586878';
-    if (tmpStage.ground) ctx.fillRect(tmpStage.ground.x, tmpStage.ground.y, tmpStage.ground.w, 6);
-    if (tmpStage.platforms) for (const p of tmpStage.platforms) ctx.fillRect(p.x, p.y, p.w, 6);
+    if (tmpStage.ground) ctx.fillRect(tmpStage.ground.x, tmpStage.ground.y, tmpStage.ground.w, 16);
+    ctx.fillStyle = '#789098';
+    if (tmpStage.ground) ctx.fillRect(tmpStage.ground.x, tmpStage.ground.y, tmpStage.ground.w, 4);
+    if (tmpStage.platforms) {
+      for (const p of tmpStage.platforms) {
+        ctx.fillStyle = '#4a586a';
+        ctx.fillRect(p.x, p.y, p.w, 12);
+        ctx.fillStyle = '#6a7888';
+        ctx.fillRect(p.x, p.y, p.w, 3);
+      }
+    }
     ctx.restore();
-
-    if (i === stageCursor) {
-      ctx.strokeStyle = '#ffe070'; ctx.lineWidth = 5;
-    } else { ctx.strokeStyle = '#5fd7ff44'; ctx.lineWidth = 1; }
+    // Frame
+    const selected = i === stageCursor;
+    ctx.strokeStyle = selected ? '#ffe070' : '#2a3050';
+    ctx.lineWidth = selected ? 5 : 2;
     ctx.strokeRect(x, y, slotW, slotH);
-    ctx.font = 'bold 20px monospace';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(STAGE_NAMES[i], x + slotW / 2, y + slotH + 26);
+    if (selected) {
+      // Corner markers (L-shapes)
+      ctx.fillStyle = '#ffe070';
+      const cs = 16;
+      ctx.fillRect(x - 4, y - 4, cs, 4);
+      ctx.fillRect(x - 4, y - 4, 4, cs);
+      ctx.fillRect(x + slotW - cs + 4, y - 4, cs, 4);
+      ctx.fillRect(x + slotW, y - 4, 4, cs);
+      ctx.fillRect(x - 4, y + slotH, cs, 4);
+      ctx.fillRect(x - 4, y + slotH - cs + 4, 4, cs);
+      ctx.fillRect(x + slotW - cs + 4, y + slotH, cs, 4);
+      ctx.fillRect(x + slotW, y + slotH - cs + 4, 4, cs);
+    }
+    // Stage name banner below card
+    ctx.fillStyle = selected ? 'rgba(255,224,112,0.2)' : 'rgba(20,24,40,0.8)';
+    ctx.fillRect(x, y + slotH + 10, slotW, 34);
+    ctx.strokeStyle = selected ? '#ffe070' : '#2a3050';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y + slotH + 10, slotW, 34);
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = selected ? '#ffe070' : '#ffffff';
+    ctx.fillText(STAGE_NAMES[i], x + slotW / 2, y + slotH + 32);
+    // Blurb
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#a0a8c0';
+    ctx.fillText(stageBlurb[i], x + slotW / 2, y + slotH + 54);
   }
   ctx.font = 'bold 18px monospace';
   ctx.fillStyle = '#ffe070';
-  ctx.fillText('LEFT/RIGHT to choose  •  Start: J / Xbox X / PS Square / Switch Y', canvas.width / 2, 496);
-  ctx.font = '15px monospace';
+  ctx.fillText('LEFT / RIGHT to choose  •  Start: J / Xbox X / PS Square / Switch Y', W / 2, 520);
+  ctx.font = '14px monospace';
   ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('Back: L / R-shoulder', canvas.width / 2, 520);
+  ctx.fillText('Back: L / R-shoulder', W / 2, 544);
   ctx.textAlign = 'left';
 }
 
 function drawResult() {
   const ctx = renderer.ctx;
+  const W = canvas.width, H = canvas.height;
   renderer.clear('#06080f');
   drawBackground(ctx);
   ctx.textAlign = 'center';
-  ctx.font = 'bold 64px monospace';
-  ctx.fillStyle = '#ffe070';
-  ctx.shadowColor = '#ff60a0'; ctx.shadowBlur = 30;
-  ctx.fillText(resultText, canvas.width / 2, canvas.height / 2);
+
+  const cx = W / 2, cy = H / 2 - 40;
+
+  // Radial victory sunburst rays rotating behind winner
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(menuTick * 0.005);
+  ctx.globalAlpha = 0.25;
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const r1 = 80, r2 = 520;
+    const col = i % 2 === 0 ? '#ffe070' : '#ff60a0';
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
+    ctx.lineTo(Math.cos(a + 0.04) * r2, Math.sin(a + 0.04) * r2);
+    ctx.lineTo(Math.cos(a - 0.04) * r2, Math.sin(a - 0.04) * r2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Expanding concentric rings
+  ctx.save();
+  for (let r = 0; r < 4; r++) {
+    const radius = 60 + r * 40 + (menuTick * 0.8) % 40;
+    const a = 0.4 - r * 0.09;
+    ctx.globalAlpha = Math.max(0, a);
+    ctx.strokeStyle = '#ffe070';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+
+  // Confetti / cursed-energy particles falling
+  for (let i = 0; i < 36; i++) {
+    const px = (i * 71 + (menuTick * 1.2)) % W;
+    const py = ((i * 37 + menuTick * (1 + (i % 3) * 0.4)) % (H + 40)) - 20;
+    const drift = Math.sin((menuTick + i * 30) * 0.04) * 8;
+    const color = (i % 3 === 0) ? '#ffe070' : (i % 3 === 1) ? '#ff60a0' : '#5fd7ff';
+    ctx.fillStyle = color;
+    ctx.fillRect(px + drift, py, 3, 3);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(px + drift, py, 1, 1);
+  }
+
+  // Winner banner — pixel title
+  // Parse resultText (e.g. "P1 WINS", "PLAYER 1 WINS", "DRAW").
+  const winText = (resultText || 'DRAW').toUpperCase();
+  // Upper "WINNER!" flourish
+  drawPixelTitle(ctx, 'WINNER!', cx, cy - 130, 6, '#ffe070', '#5a3810', '#ffe070');
+
+  // Framed main banner
+  const bw = 640, bh = 100;
+  const bx = cx - bw / 2, by = cy - 30;
+  ctx.fillStyle = 'rgba(10,14,30,0.85)';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = '#ffe070';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(bx, by, bw, bh);
+  // Double frame
+  ctx.strokeStyle = '#ff60a0';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx + 6, by + 6, bw - 12, bh - 12);
+  // Corner pixel bolts
+  ctx.fillStyle = '#ff60a0';
+  for (const [ox, oy] of [[bx - 3, by - 3], [bx + bw - 9, by - 3], [bx - 3, by + bh - 9], [bx + bw - 9, by + bh - 9]]) {
+    ctx.fillRect(ox, oy, 12, 12);
+    ctx.fillStyle = '#ffe070';
+    ctx.fillRect(ox + 3, oy + 3, 6, 6);
+    ctx.fillStyle = '#ff60a0';
+  }
+
+  // Main winner text — try pixel font, fallback to monospace if chars unsupported
+  ctx.font = 'bold 52px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = '#ff60a0'; ctx.shadowBlur = 20;
+  ctx.fillText(winText, cx, by + 66);
   ctx.shadowBlur = 0;
-  ctx.font = '22px monospace';
-  ctx.fillStyle = '#a0a8c0';
-  ctx.fillText('Press J / Xbox X / PS Square / Switch Y to return to title', canvas.width / 2, canvas.height / 2 + 70);
+
+  // Press-to-continue prompt (blinking)
+  const blink = menuTick % 60 < 40;
+  if (blink) {
+    const pbw = 680, pbh = 52;
+    const pbx = cx - pbw / 2, pby = cy + 130;
+    ctx.fillStyle = 'rgba(95,215,255,0.10)';
+    ctx.fillRect(pbx, pby, pbw, pbh);
+    ctx.strokeStyle = '#5fd7ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pbx, pby, pbw, pbh);
+    ctx.fillStyle = '#5fd7ff';
+    ctx.fillRect(pbx, pby, 5, pbh);
+    ctx.fillRect(pbx + pbw - 5, pby, 5, pbh);
+    ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = '#5fd7ff';
+    ctx.fillText('PRESS J / X / SQUARE / Y TO RETURN TO TITLE', cx, pby + 34);
+  }
+
+  // Corner cursed-energy glyphs
+  drawCornerGlyph(ctx, 60, 60, '#ffe070');
+  drawCornerGlyph(ctx, W - 60, 60, '#ffe070');
+  drawCornerGlyph(ctx, 60, H - 60, '#ff60a0');
+  drawCornerGlyph(ctx, W - 60, H - 60, '#ff60a0');
+
   ctx.textAlign = 'left';
 }
 
