@@ -72,6 +72,20 @@ wss.on('connection', (ws) => {
         room.broadcastExcept(ws, { type: 'input', slot: ws.slot, tick: msg.tick, mask: msg.mask });
         break;
       }
+      // Lobby / character-select sync. The server just relays these to the
+      // other player in the room and stamps the sender's slot so the peer
+      // can trust who sent it.
+      case 'char_cursor':
+      case 'char_lock':
+      case 'stage_cursor':
+      case 'proceed_to_stage':
+      case 'start_match': {
+        if (!ws.room) return;
+        const room = rooms.get(ws.room);
+        if (!room) return;
+        room.broadcastExcept(ws, { ...msg, slot: ws.slot });
+        break;
+      }
       case 'state_sync': {
         // Reserved for periodic checksum validation (anti-cheat)
         break;

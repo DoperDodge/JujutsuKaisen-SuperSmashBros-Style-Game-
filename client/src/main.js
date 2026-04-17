@@ -91,6 +91,10 @@ let lobbyJoinInput = '';
 let lobbyStatus = 'Local versus mode — no server needed.';
 let world = null;
 let resultText = '';
+// True once the player commits to host/join. Gates all the online
+// handshake logic in char/stage select and routes match inputs through
+// the WebSocket relay.
+let isOnline = false;
 
 // ===== Online =====
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -102,9 +106,51 @@ net.onLobby = (msg) => {
 };
 net.onStart = () => {
   lobbyStatus = `Match starting!`;
+  // Reset char-select state so both sides enter from a clean slate.
+  charCursor = [0, 1];
+  charSelections = [0, 1];
+  charLocked = [false, false];
+  stageCursor = 0;
   scene = SCENE.CHAR_SELECT;
 };
 net.onError = (e) => { lobbyStatus = 'Error: ' + (e.message || 'connection failed'); };
+
+// Remote peer moved their character cursor — mirror it locally so both
+// clients show the same selection state.
+net.onCharCursor = (msg) => {
+  const slot = msg.slot;
+  if (slot === net.localSlot) return;
+  if (!charLocked[slot]) charCursor[slot] = msg.index;
+};
+net.onCharLock = (msg) => {
+  const slot = msg.slot;
+  if (slot === net.localSlot) return;
+  charLocked[slot] = !!msg.locked;
+  if (msg.locked) {
+    charSelections[slot] = msg.selection;
+    charCursor[slot] = msg.selection;
+  }
+};
+net.onStageCursor = (msg) => {
+  if (msg.slot === net.localSlot) return;
+  stageCursor = msg.index;
+};
+net.onProceedToStage = () => {
+  if (scene === SCENE.CHAR_SELECT) scene = SCENE.STAGE_SELECT;
+};
+net.onStartMatch = (msg) => {
+  if (Array.isArray(msg.selections) && msg.selections.length === 2) {
+    charSelections = [msg.selections[0], msg.selections[1]];
+  }
+  stageCursor = msg.stage | 0;
+  world = createWorld(stageCursor);
+  scene = SCENE.MATCH;
+};
+net.onOpponentLeft = () => {
+  lobbyStatus = 'Opponent disconnected.';
+  isOnline = false;
+  scene = SCENE.TITLE;
+};
 net.connect().then(() => { netReady = true; }).catch(() => { netReady = false; });
 
 // ===== World factory =====
@@ -148,7 +194,20 @@ function updateMatch() {
   if (world.timer > 0) world.timer--;
 
   input.tick();
-  const masks = [input.current(0), input.current(1)];
+  let masks;
+  if (isOnline) {
+    // In online mode the local user drives whichever slot the server
+    // assigned them, regardless of which player index their keyboard /
+    // gamepad happens to be bound to. We collapse every local device
+    // into one mask and pull the opponent's slot from the relay.
+    const localMask =
+      input.deviceMask('kb1') | input.deviceMask('pad0') | input.deviceMask('pad1');
+    net.sendInput(world.tick, localMask);
+    const remoteMask = net.lastRemoteMask || 0;
+    masks = net.localSlot === 0 ? [localMask, remoteMask] : [remoteMask, localMask];
+  } else {
+    masks = [input.current(0), input.current(1)];
+  }
 
   for (let i = 0; i < world.fighters.length; i++) {
     const f = world.fighters[i];
@@ -543,6 +602,13 @@ function drawCharSelect() {
   ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
   ctx.fillText('CHARACTER SELECT', canvas.width / 2, 80);
   ctx.shadowBlur = 0;
+  if (isOnline) {
+    ctx.font = '16px monospace';
+    ctx.fillStyle = '#5fd7ff';
+    const youLabel = `YOU = P${net.localSlot + 1}`;
+    const roleLabel = net.localSlot === 0 ? '(host — picks stage)' : '(guest)';
+    ctx.fillText(`ONLINE  ${lobbyCode}  •  ${youLabel} ${roleLabel}`, canvas.width / 2, 108);
+  }
 
   const slotW = 240, slotH = 280;
   const startX = (canvas.width - slotW * ROSTER.length - 20 * (ROSTER.length - 1)) / 2;
@@ -604,6 +670,14 @@ function drawStageSelect() {
   ctx.shadowColor = '#5fd7ff'; ctx.shadowBlur = 16;
   ctx.fillText('STAGE SELECT', canvas.width / 2, 80);
   ctx.shadowBlur = 0;
+  if (isOnline) {
+    ctx.font = '16px monospace';
+    ctx.fillStyle = '#5fd7ff';
+    const hostLine = net.localSlot === 0
+      ? 'ONLINE — you are the host. Pick the stage and press ATTACK to start.'
+      : 'ONLINE — waiting for host to pick the stage...';
+    ctx.fillText(hostLine, canvas.width / 2, 108);
+  }
 
   const slotW = 360, slotH = 240;
   const startX = (canvas.width - slotW * 3 - 40) / 2;
@@ -689,6 +763,14 @@ function handleMenuInput() {
   input.tick();
   const pressed = (p, code) => input.pressed(p, code);
   const eitherPressed = (code) => pressed(0, code) || pressed(1, code);
+  // Device-level edge-trigger. Works regardless of which player index a
+  // device is currently assigned to — the local user can drive the UI
+  // with any controller they have plugged in. Essential in online mode
+  // where the remote slot has no local device at all.
+  const anyLocalPressed = (code) =>
+    input.devicePressed('kb1', code) ||
+    input.devicePressed('pad0', code) ||
+    input.devicePressed('pad1', code);
 
   // On the title screen accept ANY face button so unknown controller layouts
   // can still get into the game while the diagnostic helps the user identify
@@ -705,11 +787,13 @@ function handleMenuInput() {
     if (eitherPressed(INPUT.ATTACK)) {
       if (modeCursor === 0) {
         scene = SCENE.PLAYER_SELECT;
+        isOnline = false;
         charLocked = [false, false];
       } else if ((modeCursor === 1 || modeCursor === 2) && netReady) {
         lobbyMode = modeCursor === 1 ? 'host' : 'join';
         lobbyJoinInput = '';
         lobbyCode = '';
+        isOnline = true;
         lobbyStatus = lobbyMode === 'host'
           ? 'Creating room...'
           : 'Type your friend\'s 6-character room code, then press ENTER.';
@@ -721,6 +805,7 @@ function handleMenuInput() {
     if (eitherPressed(INPUT.SHIELD)) {
       scene = SCENE.MODE_SELECT;
       lobbyMode = 'idle';
+      isOnline = false;
     }
   } else if (scene === SCENE.PLAYER_SELECT) {
     // Each device sets its own assignment by pressing on itself.
@@ -743,31 +828,88 @@ function handleMenuInput() {
       if (input.devicePressed(key, INPUT.SHIELD)) { scene = SCENE.MODE_SELECT; break; }
     }
   } else if (scene === SCENE.CHAR_SELECT) {
-    for (let p = 0; p < 2; p++) {
-      if (charLocked[p]) {
-        if (pressed(p, INPUT.SHIELD) || pressed(p, INPUT.ATTACK)) charLocked[p] = false;
-        continue;
+    if (isOnline) {
+      // Online: the local user only drives their own slot. Every cursor
+      // move and lock change is relayed to the peer so both screens stay
+      // in sync. The opponent's slot is updated exclusively via the
+      // net.onCharCursor / net.onCharLock callbacks.
+      const slot = net.localSlot;
+      if (charLocked[slot]) {
+        if (anyLocalPressed(INPUT.SHIELD) || anyLocalPressed(INPUT.ATTACK)) {
+          charLocked[slot] = false;
+          net.sendCharLock(false, charSelections[slot]);
+        }
+      } else {
+        if (anyLocalPressed(INPUT.LEFT)) {
+          charCursor[slot] = (charCursor[slot] + ROSTER.length - 1) % ROSTER.length;
+          net.sendCharCursor(charCursor[slot]);
+        }
+        if (anyLocalPressed(INPUT.RIGHT)) {
+          charCursor[slot] = (charCursor[slot] + 1) % ROSTER.length;
+          net.sendCharCursor(charCursor[slot]);
+        }
+        if (anyLocalPressed(INPUT.ATTACK)) {
+          charLocked[slot] = true;
+          charSelections[slot] = charCursor[slot];
+          net.sendCharLock(true, charSelections[slot]);
+        }
       }
-      if (pressed(p, INPUT.LEFT)) charCursor[p] = (charCursor[p] + ROSTER.length - 1) % ROSTER.length;
-      if (pressed(p, INPUT.RIGHT)) charCursor[p] = (charCursor[p] + 1) % ROSTER.length;
-      if (pressed(p, INPUT.ATTACK)) { charLocked[p] = true; charSelections[p] = charCursor[p]; }
-      if (pressed(p, INPUT.SHIELD)) scene = SCENE.PLAYER_SELECT;
-    }
-    if (charLocked[0] && charLocked[1] && eitherPressed(INPUT.SPECIAL)) {
-      scene = SCENE.STAGE_SELECT;
+      // Either player may confirm once both are locked. Relay the scene
+      // change so the opponent follows along.
+      if (charLocked[0] && charLocked[1] && anyLocalPressed(INPUT.SPECIAL)) {
+        net.sendProceedToStage();
+        scene = SCENE.STAGE_SELECT;
+      }
+    } else {
+      for (let p = 0; p < 2; p++) {
+        if (charLocked[p]) {
+          if (pressed(p, INPUT.SHIELD) || pressed(p, INPUT.ATTACK)) charLocked[p] = false;
+          continue;
+        }
+        if (pressed(p, INPUT.LEFT)) charCursor[p] = (charCursor[p] + ROSTER.length - 1) % ROSTER.length;
+        if (pressed(p, INPUT.RIGHT)) charCursor[p] = (charCursor[p] + 1) % ROSTER.length;
+        if (pressed(p, INPUT.ATTACK)) { charLocked[p] = true; charSelections[p] = charCursor[p]; }
+        if (pressed(p, INPUT.SHIELD)) scene = SCENE.PLAYER_SELECT;
+      }
+      if (charLocked[0] && charLocked[1] && eitherPressed(INPUT.SPECIAL)) {
+        scene = SCENE.STAGE_SELECT;
+      }
     }
   } else if (scene === SCENE.STAGE_SELECT) {
-    if (eitherPressed(INPUT.LEFT)) stageCursor = (stageCursor + 2) % 3;
-    if (eitherPressed(INPUT.RIGHT)) stageCursor = (stageCursor + 1) % 3;
-    if (eitherPressed(INPUT.SHIELD)) scene = SCENE.CHAR_SELECT;
-    if (eitherPressed(INPUT.ATTACK)) {
-      world = createWorld(stageCursor);
-      scene = SCENE.MATCH;
+    if (isOnline) {
+      // Only the host picks the stage to avoid both clients racing. The
+      // host broadcasts cursor moves so the guest sees the highlight,
+      // then fires start_match with the authoritative selections + stage
+      // so both clients build identical worlds.
+      if (net.localSlot === 0) {
+        if (anyLocalPressed(INPUT.LEFT)) {
+          stageCursor = (stageCursor + 2) % 3;
+          net.sendStageCursor(stageCursor);
+        }
+        if (anyLocalPressed(INPUT.RIGHT)) {
+          stageCursor = (stageCursor + 1) % 3;
+          net.sendStageCursor(stageCursor);
+        }
+        if (anyLocalPressed(INPUT.ATTACK)) {
+          net.sendStartMatch(stageCursor, [charSelections[0], charSelections[1]]);
+          world = createWorld(stageCursor);
+          scene = SCENE.MATCH;
+        }
+      }
+    } else {
+      if (eitherPressed(INPUT.LEFT)) stageCursor = (stageCursor + 2) % 3;
+      if (eitherPressed(INPUT.RIGHT)) stageCursor = (stageCursor + 1) % 3;
+      if (eitherPressed(INPUT.SHIELD)) scene = SCENE.CHAR_SELECT;
+      if (eitherPressed(INPUT.ATTACK)) {
+        world = createWorld(stageCursor);
+        scene = SCENE.MATCH;
+      }
     }
   } else if (scene === SCENE.RESULT) {
     if (eitherPressed(INPUT.ATTACK)) {
       scene = SCENE.TITLE;
       charLocked = [false, false];
+      isOnline = false;
     }
   }
 }

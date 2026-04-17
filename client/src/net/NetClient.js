@@ -9,9 +9,18 @@ export class NetClient {
     this.roomCode = null;
     this.localSlot = 0;       // 0 or 1
     this.remoteInputs = {};   // tick -> input mask
+    this.lastRemoteMask = 0;  // most recent opponent input we have seen
     this.onLobby = () => {};
     this.onStart = () => {};
     this.onError = () => {};
+    // Character / stage / match handshake callbacks. Default to no-ops so
+    // the client can install only the ones it cares about.
+    this.onCharCursor = () => {};
+    this.onCharLock = () => {};
+    this.onStageCursor = () => {};
+    this.onProceedToStage = () => {};
+    this.onStartMatch = () => {};
+    this.onOpponentLeft = () => {};
   }
   connect() {
     return new Promise((resolve, reject) => {
@@ -28,6 +37,11 @@ export class NetClient {
   createRoom() { this._send({ type: 'create_room' }); }
   joinRoom(code) { this._send({ type: 'join_room', code }); }
   sendInput(tick, mask) { this._send({ type: 'input', tick, mask }); }
+  sendCharCursor(index) { this._send({ type: 'char_cursor', index }); }
+  sendCharLock(locked, selection) { this._send({ type: 'char_lock', locked, selection }); }
+  sendStageCursor(index) { this._send({ type: 'stage_cursor', index }); }
+  sendProceedToStage() { this._send({ type: 'proceed_to_stage' }); }
+  sendStartMatch(stage, selections) { this._send({ type: 'start_match', stage, selections }); }
   _onMessage(e) {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     switch (msg.type) {
@@ -38,7 +52,15 @@ export class NetClient {
       case 'start':
         this.onStart(msg); break;
       case 'input':
-        this.remoteInputs[msg.tick] = msg.mask; break;
+        this.remoteInputs[msg.tick] = msg.mask;
+        this.lastRemoteMask = msg.mask;
+        break;
+      case 'char_cursor':  this.onCharCursor(msg); break;
+      case 'char_lock':    this.onCharLock(msg); break;
+      case 'stage_cursor': this.onStageCursor(msg); break;
+      case 'proceed_to_stage': this.onProceedToStage(msg); break;
+      case 'start_match':  this.onStartMatch(msg); break;
+      case 'opponent_left': this.onOpponentLeft(msg); break;
       case 'error':
         this.onError(msg); break;
     }
