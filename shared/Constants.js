@@ -8,9 +8,9 @@ export const CONSTANTS = {
   GRAVITY: 0.58,
   MAX_FALL_SPEED: 12,
   FAST_FALL_SPEED: 16,
-  HITSTUN_BASE: 6,
+  HITSTUN_BASE: 5,
   HITSTUN_MULTIPLIER: 0.4,
-  KNOCKBACK_BASE: 3.0,
+  KNOCKBACK_BASE: 2.4,
   KNOCKBACK_SCALING: 0.12,
   DI_INFLUENCE: 15,
   SHIELD_HP: 100,
@@ -56,7 +56,7 @@ export const STATE = {
 
 // Domain meter gain values
 export const DOMAIN_GAIN = {
-  PASSIVE: 2,        // per tick
+  PASSIVE: 2,
   JAB: 8,
   TILT: 8,
   SMASH: 25,

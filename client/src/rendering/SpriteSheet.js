@@ -2,10 +2,29 @@
 // distinguishing features: face, hair, outfit, accessories, build/height.
 // Sprites are 80x112 base, rendered at 2x scale (160x224) for the 128-bit
 // pixel art look specified in JJK_SMASH_GAME_PLAN.md section 9.
+//
+// Sprite coordinate system (pre-scale):
+//   - 80 wide, 112 tall
+//   - sprite column 40 is the character's centerline (fighter x)
+//   - sprite row  108 is the character's feet (fighter y)
+//   - The render scale is 2x, so one sprite-pixel == 2 world-pixels.
+//
+// Every attack pose exposes a `swing` rect (in sprite-pixel coords). That
+// rect is rendered as the visible FX (slash/punch/orb/etc.) and is ALSO
+// the source of truth for the move's active hitbox — see
+// `hitboxFromPose()` below, which converts a pose's swing rect into the
+// fighter-local hitbox geometry. This keeps attacks visually honest:
+// what you see is what hits.
 
 const SPRITE_W = 80;
 const SPRITE_H = 112;
 const SCALE = 2;
+// Fighter hurtbox height used by Fighter._buildHitboxWorld. Must match the
+// value in Fighter.js (this.height). Kept here because hitbox alignment
+// depends on the feet-to-top mapping in sprite space.
+const HURT_HEIGHT = 90;
+const FEET_SPRITE_Y = 108;   // sprite row where feet sit
+const CENTER_SPRITE_X = 40;  // sprite column where the character centers
 
 // Helper: pixel rect with optional shade
 function px(ctx, x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x | 0, y | 0, w | 0, h | 0); }
@@ -115,6 +134,25 @@ const POSES = {
   // Grab.
   grab: { armA: [-2, 0], armB: [22, 0], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
           swing: { x: 56, y: 40, w: 14, h: 14 }, fx: 'punch' },
+
+  // Defensive/recovery poses.
+  land:         { armA: [-3, 2], armB: [3, 2], legA: 1, legB: -1, body: 2, head: 1, blink: 0 },
+  roll:         { armA: [-4, 2], armB: [4, -2], legA: -2, legB: 4, body: 2, head: 2, blink: 1 },
+  spotdodge:    { armA: [-2, 2], armB: [2, 2], legA: 0, legB: 0, body: 2, head: 1, blink: 1 },
+  airdodge:     { armA: [-4, -2], armB: [4, -2], legA: -1, legB: 1, body: 0, head: 0, blink: 1 },
+  // Grab hold / throws. Grab_hold = both arms extended; throws re-use swing visuals.
+  grab_hold: { armA: [-2, 2], armB: [22, 0], legA: -1, legB: 2, body: 0, head: 0, blink: 0 },
+  throw_f: { armA: [-2, -4], armB: [26, -4], legA: -2, legB: 2, body: -1, head: 0, blink: 0,
+             swing: { x: 50, y: 36, w: 26, h: 14 }, fx: 'slash' },
+  throw_b: { armA: [-26, -4], armB: [2, -4], legA: 2, legB: -2, body: -1, head: 0, blink: 0,
+             swing: { x: 4, y: 36, w: 26, h: 14 }, fx: 'slash' },
+  throw_u: { armA: [-2, -10], armB: [2, -10], legA: -1, legB: 1, body: -3, head: -3, blink: 0,
+             swing: { x: 30, y: -4, w: 20, h: 18 }, fx: 'flare' },
+  throw_d: { armA: [-3, 6], armB: [3, 6], legA: 2, legB: -2, body: 4, head: 2, blink: 0,
+             swing: { x: 20, y: 86, w: 40, h: 14 }, fx: 'shock' },
+  // Charged smash (max charge) — bigger swing rect = bigger hitbox.
+  fsmash_max: { armA: [-6, 1], armB: [26, -3], legA: -5, legB: 6, body: 0, head: 0, blink: 0,
+                swing: { x: 50, y: 26, w: 44, h: 24 }, fx: 'slash' },
 
   // Backwards-compat aliases used by old _updateAnim paths.
   attack1: { armA: [-2, 0], armB: [16, -2], legA: -1, legB: 2, body: 0, head: 0, blink: 0,
@@ -547,6 +585,47 @@ function drawPoseFX(ctx, pose, character) {
   ctx.globalAlpha = 1;
   ctx.restore();
 }
+
+// =========================================================
+// Hitbox <-> pose alignment.
+// =========================================================
+// Returns a hitbox geometry `{ x, y, w, h }` (in fighter-local coords used by
+// Fighter._buildHitboxWorld) aligned to the pose's swing rect. Caller passes
+// `{ damage, knockback, angle, ... }` which are spliced in. Optional `pad`
+// grows the hitbox slightly outside the visible FX so attacks feel generous
+// (classic fighting-game "hitbox slightly bigger than the graphic" trick).
+//
+// Pose sprite coords convert to fighter-local like this:
+//   center_x_local = (s.x + s.w/2 - CENTER_SPRITE_X) * SCALE
+//                  = 2*s.x - 80 + s.w
+//   world_left     = fighter.x + center_x_local * facing - w/2
+//   world_top      = fighter.y - HURT_HEIGHT + y_local
+//   y_local        = (s.y + s.h/2 - FEET_SPRITE_Y) * SCALE + HURT_HEIGHT
+//                  = 2*s.y - 216 + s.h + HURT_HEIGHT  = 2*s.y + s.h - 126
+//   h              = s.h * SCALE
+// For `x`/`y` we store the CENTER offset so the existing `_buildHitboxWorld`
+// path (which subtracts `w*0.5`) drops the hitbox at the visible FX's edges.
+export function hitboxFromPose(poseName, props = {}) {
+  const p = POSES[poseName];
+  const pad = props.pad ?? 0;
+  if (!p || !p.swing) {
+    return {
+      x: 32, y: 50, w: 30, h: 22,
+      damage: 4, knockback: 20, angle: 40,
+      ...props,
+    };
+  }
+  const s = p.swing;
+  const w = s.w * SCALE + pad * 2;
+  const h = s.h * SCALE + pad * 2;
+  const x = (2 * s.x - 80 + s.w);
+  const y = (2 * s.y - 126 + s.h);
+  const { pad: _pad, ...rest } = props;
+  return { x, y, w, h, ...rest };
+}
+
+// Expose POSES read-only for tools / debugging. Mutating is unsupported.
+export const SPRITE_POSES = POSES;
 
 // =========================================================
 // SpriteSheet — builds a per-character offscreen-canvas atlas.
