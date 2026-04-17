@@ -166,71 +166,175 @@ const POSES = {
 // =========================================================
 // Generic body parts. The character renderer composes them
 // with character-specific colors and adds unique overlays.
+// These are upgraded "anime-style" body parts: proper
+// tapered torso, jointed limbs, and rounded heads with
+// cheek/chin structure. Multi-tone shading per part.
 // =========================================================
 function drawShadow(ctx) {
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  // Soft elliptical shadow with a darker inner core.
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
-  ctx.ellipse(40, 108, 18, 3, 0, 0, Math.PI * 2);
+  ctx.ellipse(40, 108, 22, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(40, 108, 14, 2.5, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
-function drawLegs(ctx, pose, palette, build) {
-  const w = build === 'big' ? 7 : 6;
-  // Back leg
-  px(ctx, 32, 78 + pose.legA, w, 22, palette.pants);
-  px(ctx, 32, 78 + pose.legA, w, 3, palette.pantsHi);
-  px(ctx, 32, 96, w, 4, palette.shoe);
-  // Front leg
-  px(ctx, 41, 78 + pose.legB, w, 22, palette.pants);
-  px(ctx, 41, 78 + pose.legB, w, 3, palette.pantsHi);
-  px(ctx, 41, 96, w, 4, palette.shoe);
-}
-
-function drawTorso(ctx, pose, palette, build) {
-  const x = build === 'big' ? 26 : 28;
-  const w = build === 'big' ? 28 : 24;
-  const top = 46 + pose.body;
-  // Body block
-  px(ctx, x, top, w, 34, palette.jacket);
-  // Lighting on left edge
-  px(ctx, x, top, 3, 34, palette.jacketHi);
-  // Belt / bottom trim
-  px(ctx, x, top + 30, w, 4, palette.belt || palette.jacketShade);
-  // Collar / chest accent
-  px(ctx, x + 4, top, w - 8, 5, palette.collar || palette.jacketHi);
-  // Stitch line (jacket center)
-  if (palette.jacketLine) {
-    px(ctx, x + (w / 2 | 0), top + 6, 1, 22, palette.jacketLine);
+// Tapered leg: thigh -> knee -> shin -> shoe with laces hint.
+function drawLeg(ctx, x, topY, palette, build) {
+  const w = build === 'big' ? 8 : 7;
+  // Thigh (wider top)
+  px(ctx, x, topY, w, 10, palette.pants);
+  px(ctx, x, topY, w, 2, palette.pantsHi);
+  px(ctx, x + w - 1, topY + 1, 1, 9, palette.pantsShade || palette.pantsHi);
+  // Knee joint (slightly darker band)
+  px(ctx, x, topY + 10, w, 2, palette.pantsShade || palette.pants);
+  // Shin (narrower)
+  const sw = w - 1;
+  px(ctx, x, topY + 12, sw, 8, palette.pants);
+  px(ctx, x, topY + 12, sw, 1, palette.pantsHi);
+  px(ctx, x + sw - 1, topY + 13, 1, 7, palette.pantsShade || palette.pantsHi);
+  // Shoe: sole + upper
+  px(ctx, x - 1, topY + 20, sw + 3, 2, palette.shoe);
+  px(ctx, x - 1, topY + 22, sw + 3, 2, '#000000');
+  // Lace hint
+  if (palette.shoeLace) {
+    px(ctx, x + 1, topY + 20, 1, 1, palette.shoeLace);
+    px(ctx, x + sw - 1, topY + 20, 1, 1, palette.shoeLace);
   }
 }
 
-function drawArm(ctx, x, y, palette, len = 18, hand = true) {
-  px(ctx, x, y, 5, len, palette.jacket);
-  px(ctx, x, y, 5, 2, palette.jacketHi);
-  if (hand) px(ctx, x, y + len, 5, 5, palette.skin);
+function drawLegs(ctx, pose, palette, build) {
+  // Leg positions: legA is back leg (drawn first, partially behind torso),
+  // legB is front leg.
+  const backX = build === 'big' ? 30 : 31;
+  const frontX = build === 'big' ? 41 : 42;
+  drawLeg(ctx, backX, 78 + pose.legA, palette, build);
+  drawLeg(ctx, frontX, 78 + pose.legB, palette, build);
+}
+
+// Tapered torso with shoulder yoke, center seam, and belt.
+function drawTorso(ctx, pose, palette, build) {
+  const big = build === 'big';
+  const x = big ? 24 : 27;
+  const w = big ? 32 : 26;
+  const top = 46 + pose.body;
+  const h = 34;
+  // Main jacket body (slightly tapered by drawing a narrower bottom row)
+  px(ctx, x, top, w, h, palette.jacket);
+  // Taper (waist)
+  px(ctx, x, top + h - 6, 1, 6, palette.jacketShade || palette.jacket);
+  px(ctx, x + w - 1, top + h - 6, 1, 6, palette.jacketShade || palette.jacket);
+  // Highlight on left edge (anime light source top-left)
+  px(ctx, x, top, 2, h, palette.jacketHi);
+  px(ctx, x + 2, top + 1, 1, h - 2, palette.jacketHi);
+  // Shadow on right edge
+  px(ctx, x + w - 2, top + 1, 2, h - 2, palette.jacketShade || palette.jacket);
+  // Shoulder yoke (upper chest band)
+  px(ctx, x + 2, top, w - 4, 3, palette.jacketHi);
+  // Collar (V-neck or high collar determined by palette.collar)
+  px(ctx, x + 3, top, w - 6, 4, palette.collar || palette.jacketShade);
+  px(ctx, x + (w / 2 | 0) - 1, top + 2, 2, 3, palette.skin); // collar gap
+  // Center seam / zipper
+  if (palette.jacketLine) {
+    px(ctx, x + (w / 2 | 0), top + 5, 1, h - 10, palette.jacketLine);
+    // Button dots
+    px(ctx, x + (w / 2 | 0), top + 10, 1, 1, palette.jacketHi);
+    px(ctx, x + (w / 2 | 0), top + 18, 1, 1, palette.jacketHi);
+    px(ctx, x + (w / 2 | 0), top + 24, 1, 1, palette.jacketHi);
+  }
+  // Belt with buckle
+  px(ctx, x, top + h - 4, w, 3, palette.belt || palette.jacketShade);
+  px(ctx, x, top + h - 4, w, 1, '#000000');
+  const bx = x + (w / 2 | 0) - 1;
+  px(ctx, bx, top + h - 4, 3, 3, palette.buckle || '#ccaa44');
+  px(ctx, bx + 1, top + h - 3, 1, 1, '#000000');
+}
+
+// Jointed arm: shoulder -> upper arm -> elbow -> forearm -> hand.
+function drawArm(ctx, x, y, palette, len = 18) {
+  const upperH = Math.round(len * 0.55);
+  const lowerH = len - upperH;
+  // Upper arm
+  px(ctx, x, y, 5, upperH, palette.jacket);
+  px(ctx, x, y, 5, 1, palette.jacketHi);
+  px(ctx, x, y, 1, upperH, palette.jacketHi);
+  px(ctx, x + 4, y + 1, 1, upperH - 1, palette.jacketShade || palette.jacket);
+  // Elbow band (slightly darker)
+  px(ctx, x, y + upperH, 5, 1, palette.jacketShade || palette.jacket);
+  // Forearm (slightly narrower)
+  px(ctx, x, y + upperH + 1, 4, lowerH - 1, palette.jacket);
+  px(ctx, x, y + upperH + 1, 4, 1, palette.jacketHi);
+  px(ctx, x + 3, y + upperH + 2, 1, lowerH - 3, palette.jacketShade || palette.jacket);
+  // Cuff
+  px(ctx, x, y + len - 2, 4, 2, palette.cuff || palette.jacketShade || palette.jacket);
+  // Hand
+  px(ctx, x, y + len, 4, 4, palette.skin);
+  px(ctx, x, y + len, 4, 1, palette.skin); // highlight
+  px(ctx, x + 3, y + len + 1, 1, 3, palette.skinShade);
+  // Knuckle hint
+  px(ctx, x, y + len + 3, 4, 1, palette.skinShade);
 }
 
 function drawArms(ctx, pose, palette, build) {
+  const big = build === 'big';
   const baseY = 50 + pose.body;
-  const leftX = (build === 'big' ? 22 : 24) + pose.armA[0];
-  const rightX = (build === 'big' ? 53 : 51) + pose.armB[0];
+  const leftX = (big ? 20 : 22) + pose.armA[0];
+  const rightX = (big ? 55 : 53) + pose.armB[0];
   drawArm(ctx, leftX,  baseY + pose.armA[1], palette);
   drawArm(ctx, rightX, baseY + pose.armB[1], palette);
 }
 
-// Round-ish head (16x16). Eyes vary per character.
+// Anime-style head: rounded oval, jaw taper, ear hint, neck.
 function drawHead(ctx, pose, palette, faceFn) {
-  const top = 24 + pose.head;
-  // Skin block
-  px(ctx, 30, top, 20, 18, palette.skin);
-  // Shading on right
-  px(ctx, 48, top + 2, 2, 14, palette.skinShade);
-  // Bottom jaw
-  px(ctx, 32, top + 17, 16, 2, palette.skinShade);
+  const top = 22 + pose.head;
+  // Crown row (rounded)
+  px(ctx, 32, top, 16, 1, palette.skin);
+  px(ctx, 30, top + 1, 20, 1, palette.skin);
+  // Main head block
+  px(ctx, 29, top + 2, 22, 15, palette.skin);
+  // Highlight (top-left)
+  px(ctx, 29, top + 2, 22, 1, '#ffffff');
+  ctx.globalAlpha = 0.25;
+  px(ctx, 29, top + 2, 22, 1, '#ffffff');
+  ctx.globalAlpha = 1;
+  px(ctx, 30, top + 2, 3, 7, lighten(palette.skin, 0.12));
+  // Right-side shading
+  px(ctx, 49, top + 2, 2, 14, palette.skinShade);
+  px(ctx, 48, top + 12, 1, 5, palette.skinShade);
+  // Jaw taper (pixel corners removed for rounded look)
+  px(ctx, 29, top + 15, 1, 2, 'rgba(0,0,0,0)');
+  px(ctx, 50, top + 15, 1, 2, 'rgba(0,0,0,0)');
+  px(ctx, 30, top + 16, 20, 1, palette.skin);
+  px(ctx, 32, top + 17, 16, 1, palette.skinShade);
+  // Chin
+  px(ctx, 34, top + 18, 12, 1, palette.skin);
+  px(ctx, 35, top + 19, 10, 1, palette.skinShade);
+  // Ears (small hint on each side)
+  px(ctx, 28, top + 8, 2, 5, palette.skin);
+  px(ctx, 28, top + 8, 1, 5, palette.skinShade);
+  px(ctx, 50, top + 8, 2, 5, palette.skin);
+  px(ctx, 51, top + 8, 1, 5, palette.skinShade);
   // Neck
-  px(ctx, 36, top + 18, 8, 4, palette.skin);
-  // Face features (handed off)
-  faceFn && faceFn(ctx, 30, top, pose);
+  px(ctx, 35, top + 20, 10, 4, palette.skin);
+  px(ctx, 35, top + 20, 10, 1, palette.skinShade);
+  px(ctx, 43, top + 20, 2, 4, palette.skinShade);
+  // Face features (handed off to per-character)
+  faceFn && faceFn(ctx, 30, top + 2, pose);
+}
+
+// Small color math helper for highlight generation.
+function lighten(hex, amt) {
+  const m = hex.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.min(255, r + ((255 - r) * amt) | 0);
+  g = Math.min(255, g + ((255 - g) * amt) | 0);
+  b = Math.min(255, b + ((255 - b) * amt) | 0);
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
 }
 
 // =========================================================
@@ -238,214 +342,489 @@ function drawHead(ctx, pose, palette, faceFn) {
 // =========================================================
 
 function drawGojo(ctx, pose) {
+  // Gojo Satoru — "The Strongest". Tall lean frame, white spiky hair,
+  // black blindfold with Six Eyes glow, dark navy JJH uniform with high
+  // collar, subtle Infinity shimmer (drawn by the pose when active).
   const palette = {
-    skin: '#f5d8b6', skinShade: '#d8b08a',
-    jacket: '#152044', jacketHi: '#2a3a6e', jacketShade: '#0a1230',
-    jacketLine: '#3a4880', collar: '#0a0d20', belt: '#3a4060',
-    pants: '#0d1530', pantsHi: '#1c2848', shoe: '#070a18',
+    skin: '#f5d8b6', skinShade: '#c9a577',
+    jacket: '#131a3a', jacketHi: '#2a3a6e', jacketShade: '#08102a',
+    jacketLine: '#0a0f26', collar: '#050818', belt: '#2a3052',
+    buckle: '#98a8d8', cuff: '#080d24',
+    pants: '#0a1128', pantsHi: '#1a244c', pantsShade: '#04071a',
+    shoe: '#02050f', shoeLace: '#5a6888',
   };
   drawShadow(ctx);
   drawLegs(ctx, pose, palette, 'lean');
   drawTorso(ctx, pose, palette, 'lean');
   drawArms(ctx, pose, palette, 'lean');
+  // High collar (Gojo's signature — wraps around lower face)
+  const collarY = 44 + pose.body;
+  px(ctx, 30, collarY, 20, 4, palette.jacket);
+  px(ctx, 30, collarY, 20, 1, palette.jacketHi);
+  px(ctx, 30, collarY + 3, 20, 1, palette.jacketShade);
   drawHead(ctx, pose, palette, (cx, x, y) => {
-    // Blindfold across eyes
-    px(ctx, x + 0, y + 6, 20, 4, '#0a0a14');
-    // Six Eyes glow at edges (only when not blinking / hurt)
+    // Blindfold — wraps from one temple to the other, with a subtle band shine.
+    const bf = '#07070e';
+    px(ctx, x - 1, y + 5, 22, 5, bf);
+    px(ctx, x - 1, y + 5, 22, 1, '#1a1a26');      // top edge highlight
+    px(ctx, x - 1, y + 9, 22, 1, '#030308');      // bottom shadow
+    // Blindfold wrap lines (subtle bands)
+    px(ctx, x + 4, y + 5, 1, 5, '#15151f');
+    px(ctx, x + 15, y + 5, 1, 5, '#15151f');
+    // Six Eyes — electric blue glow peeking through the blindfold's edges.
     if (!pose.blink) {
-      px(ctx, x + 2, y + 7, 2, 2, '#5fd7ff');
-      px(ctx, x + 16, y + 7, 2, 2, '#5fd7ff');
+      px(ctx, x - 1, y + 7, 2, 2, '#c7f2ff');
+      px(ctx, x - 1, y + 7, 1, 2, '#5fd7ff');
+      px(ctx, x + 19, y + 7, 2, 2, '#c7f2ff');
+      px(ctx, x + 20, y + 7, 1, 2, '#5fd7ff');
+      // Faint glow beneath blindfold center
+      ctx.globalAlpha = 0.35;
+      px(ctx, x + 7, y + 7, 6, 2, '#5fd7ff');
+      ctx.globalAlpha = 1;
     }
-    // Mouth
-    px(ctx, x + 8, y + 14, 4, 1, '#7a4030');
+    // Nose hint (subtle shadow)
+    px(ctx, x + 10, y + 11, 1, 2, palette.skinShade);
+    // Mouth — slight smirk
+    px(ctx, x + 8, y + 14, 5, 1, '#6a2820');
+    px(ctx, x + 12, y + 13, 1, 1, '#6a2820');
   });
-  // Hair: spiky white on top + sides
+  // Hair: signature spiky white with bluish-grey shadow layer.
   const hy = 22 + pose.head;
-  px(ctx, 28, hy, 24, 6, '#ffffff');
-  px(ctx, 28, hy, 24, 2, '#e0e0e8');
-  // Spikes
-  px(ctx, 30, hy - 2, 3, 2, '#ffffff');
-  px(ctx, 36, hy - 3, 3, 3, '#ffffff');
-  px(ctx, 42, hy - 2, 3, 2, '#ffffff');
-  px(ctx, 48, hy - 3, 3, 3, '#ffffff');
-  // Side bangs
-  px(ctx, 28, hy + 4, 2, 6, '#ffffff');
-  px(ctx, 50, hy + 4, 2, 6, '#ffffff');
-  // Infinity shimmer (subtle outline)
+  // Back hair layer (slightly grey/shadow)
+  px(ctx, 28, hy + 4, 24, 4, '#c8cce0');
+  // Main white hair mass
+  px(ctx, 27, hy - 1, 26, 7, '#ffffff');
+  px(ctx, 27, hy - 1, 26, 1, '#ffffff');
+  // Shadow under hair mass
+  px(ctx, 28, hy + 6, 24, 1, '#c8cce0');
+  // Left temple bang
+  px(ctx, 27, hy + 3, 2, 7, '#ffffff');
+  px(ctx, 27, hy + 3, 1, 7, '#d8dce8');
+  // Right temple bang
+  px(ctx, 51, hy + 3, 2, 7, '#ffffff');
+  px(ctx, 52, hy + 3, 1, 7, '#d8dce8');
+  // Spikes — irregular peaks matching anime silhouette
+  px(ctx, 29, hy - 3, 3, 3, '#ffffff');
+  px(ctx, 32, hy - 2, 2, 2, '#ffffff');
+  px(ctx, 34, hy - 4, 4, 4, '#ffffff');
+  px(ctx, 38, hy - 2, 2, 2, '#ffffff');
+  px(ctx, 40, hy - 5, 4, 5, '#ffffff');
+  px(ctx, 44, hy - 3, 3, 3, '#ffffff');
+  px(ctx, 47, hy - 4, 3, 4, '#ffffff');
+  // Shadow inside the hair mass (depth)
+  px(ctx, 30, hy + 1, 20, 1, '#d4d8e4');
+  // Middle parting highlight
+  px(ctx, 38, hy, 1, 5, '#e8ecf4');
+  // Forelock that sweeps down between blindfold edge and forehead
+  px(ctx, 36, hy + 5, 2, 3, '#ffffff');
+  px(ctx, 42, hy + 5, 2, 3, '#ffffff');
+  // Ear covering strands
+  px(ctx, 27, hy + 10, 1, 4, '#ffffff');
+  px(ctx, 52, hy + 10, 1, 4, '#ffffff');
+  // Infinity shimmer — a dashed faint pattern around the body when active.
   if (pose.glow) {
-    ctx.strokeStyle = '#5fd7ff';
+    ctx.strokeStyle = 'rgba(95,215,255,0.6)';
     ctx.lineWidth = 1;
-    ctx.strokeRect(20, 20, 40, 80);
+    ctx.setLineDash([2, 3]);
+    ctx.strokeRect(18, 18, 44, 82);
+    ctx.setLineDash([]);
   }
 }
 
 function drawYuji(ctx, pose) {
+  // Yuji Itadori — average muscular build, pink/salmon spiky hair with
+  // undercut, Tokyo Jujutsu High dark-blue hooded uniform.
   const palette = {
-    skin: '#f5cfa3', skinShade: '#c89870',
-    jacket: '#1c2440', jacketHi: '#2c3858', jacketShade: '#10162c',
-    jacketLine: '#0a0d1c', collar: '#0a0e1c', belt: '#000000',
-    pants: '#10162c', pantsHi: '#202848', shoe: '#181818',
+    skin: '#f5cfa3', skinShade: '#c49275',
+    jacket: '#1a2342', jacketHi: '#2d3a62', jacketShade: '#0e1428',
+    jacketLine: '#060b1e', collar: '#070c22', belt: '#0a0a0e',
+    buckle: '#b08038', cuff: '#0a1024',
+    pants: '#0f1530', pantsHi: '#1f2848', pantsShade: '#050a1c',
+    shoe: '#141418', shoeLace: '#3a3a42',
   };
   drawShadow(ctx);
   drawLegs(ctx, pose, palette, 'normal');
   drawTorso(ctx, pose, palette, 'normal');
-  // Hood at back of jacket
-  const hy = 42 + pose.body;
-  px(ctx, 26, hy, 28, 6, palette.jacket);
-  px(ctx, 26, hy, 28, 2, palette.jacketHi);
+  // Hood sitting at the back of the shoulders (Yuji's signature hoodie look).
+  const hoodY = 40 + pose.body;
+  // Hood wraps around the back of the neck, slightly puffed.
+  px(ctx, 24, hoodY, 32, 8, palette.jacket);
+  px(ctx, 24, hoodY, 32, 2, palette.jacketHi);
+  px(ctx, 24, hoodY + 7, 32, 1, palette.jacketShade);
+  // Inner hood shadow
+  px(ctx, 28, hoodY + 2, 24, 4, palette.jacketShade);
+  // Drawstrings
+  px(ctx, 34, hoodY + 8, 1, 5, '#e8d070');
+  px(ctx, 45, hoodY + 8, 1, 5, '#e8d070');
+  px(ctx, 34, hoodY + 13, 2, 1, '#a87820');
+  px(ctx, 45, hoodY + 13, 2, 1, '#a87820');
   drawArms(ctx, pose, palette, 'normal');
   drawHead(ctx, pose, palette, (cx, x, y) => {
-    // Eyes (golden brown)
+    // Eyebrows (determined brow) — anime expressive shape.
+    px(ctx, x + 3, y + 5, 5, 1, '#3a1a10');
+    px(ctx, x + 13, y + 5, 5, 1, '#3a1a10');
+    px(ctx, x + 3, y + 6, 1, 1, '#3a1a10');
+    px(ctx, x + 17, y + 6, 1, 1, '#3a1a10');
+    // Eyes — large anime style with white + iris + pupil + highlight.
     if (!pose.blink) {
-      px(ctx, x + 4, y + 7, 3, 3, '#ffffff');
-      px(ctx, x + 13, y + 7, 3, 3, '#ffffff');
-      px(ctx, x + 5, y + 8, 2, 2, '#3a2010');
-      px(ctx, x + 14, y + 8, 2, 2, '#3a2010');
+      // Left eye
+      px(ctx, x + 3, y + 7, 5, 4, '#ffffff');
+      px(ctx, x + 4, y + 7, 3, 4, '#f8c378');   // iris (golden-brown)
+      px(ctx, x + 5, y + 8, 2, 2, '#2a1408');   // pupil
+      px(ctx, x + 5, y + 7, 1, 1, '#ffffff');   // highlight
+      // Right eye
+      px(ctx, x + 13, y + 7, 5, 4, '#ffffff');
+      px(ctx, x + 14, y + 7, 3, 4, '#f8c378');
+      px(ctx, x + 15, y + 8, 2, 2, '#2a1408');
+      px(ctx, x + 15, y + 7, 1, 1, '#ffffff');
     } else {
-      px(ctx, x + 4, y + 8, 3, 1, '#3a2010');
-      px(ctx, x + 13, y + 8, 3, 1, '#3a2010');
+      // Closed eyes (smile arcs)
+      px(ctx, x + 3, y + 9, 5, 1, '#2a1408');
+      px(ctx, x + 4, y + 8, 3, 1, '#2a1408');
+      px(ctx, x + 13, y + 9, 5, 1, '#2a1408');
+      px(ctx, x + 14, y + 8, 3, 1, '#2a1408');
     }
-    // Mouth
-    px(ctx, x + 8, y + 14, 4, 1, '#7a4030');
+    // Nose hint
+    px(ctx, x + 10, y + 10, 1, 2, palette.skinShade);
+    // Mouth — slight open confident grin
+    px(ctx, x + 8, y + 13, 5, 1, '#6a2818');
+    px(ctx, x + 9, y + 14, 3, 1, '#8a3820');
   });
-  // Hair: pink spiky undercut
+  // Hair: pink top with obvious undercut, messy spikes.
   const hairY = 22 + pose.head;
-  // Undercut sides (darker)
-  px(ctx, 28, hairY + 4, 2, 4, '#a85068');
-  px(ctx, 50, hairY + 4, 2, 4, '#a85068');
-  // Pink top
-  px(ctx, 30, hairY, 20, 6, '#ff8da1');
-  px(ctx, 30, hairY, 20, 2, '#ffb0c0');
-  // Spikes
-  px(ctx, 32, hairY - 2, 3, 2, '#ff8da1');
-  px(ctx, 38, hairY - 3, 3, 3, '#ff8da1');
-  px(ctx, 44, hairY - 2, 3, 2, '#ff8da1');
+  // Undercut buzzed sides (darker pink-brown roots)
+  px(ctx, 28, hairY + 5, 2, 6, '#5a2838');
+  px(ctx, 50, hairY + 5, 2, 6, '#5a2838');
+  px(ctx, 28, hairY + 5, 2, 1, '#70384a');
+  px(ctx, 50, hairY + 5, 2, 1, '#70384a');
+  // Main pink hair mass (top part above the undercut line)
+  px(ctx, 29, hairY, 22, 7, '#e86a84');
+  // Bright highlight (top-lit anime look)
+  px(ctx, 29, hairY, 22, 2, '#ff9ab0');
+  px(ctx, 31, hairY + 1, 18, 1, '#ffb8c8');
+  // Shadow band at hairline
+  px(ctx, 29, hairY + 6, 22, 1, '#c84e68');
+  // Defined spikes (irregular, anime-style peaks)
+  px(ctx, 30, hairY - 2, 3, 3, '#e86a84');
+  px(ctx, 30, hairY - 2, 3, 1, '#ff9ab0');
+  px(ctx, 34, hairY - 3, 4, 4, '#e86a84');
+  px(ctx, 34, hairY - 3, 4, 1, '#ff9ab0');
+  px(ctx, 39, hairY - 4, 3, 5, '#e86a84');
+  px(ctx, 39, hairY - 4, 3, 1, '#ff9ab0');
+  px(ctx, 43, hairY - 3, 4, 4, '#e86a84');
+  px(ctx, 43, hairY - 3, 4, 1, '#ff9ab0');
+  px(ctx, 47, hairY - 2, 3, 3, '#e86a84');
+  px(ctx, 47, hairY - 2, 3, 1, '#ff9ab0');
+  // Front bangs sweeping down to brow
+  px(ctx, 33, hairY + 6, 3, 2, '#e86a84');
+  px(ctx, 33, hairY + 6, 1, 2, '#c84e68');
+  px(ctx, 44, hairY + 6, 3, 2, '#e86a84');
+  px(ctx, 46, hairY + 6, 1, 2, '#c84e68');
 }
 
 function drawSukuna(ctx, pose) {
+  // Ryomen Sukuna — King of Curses. Pink hair with dark stripe markings,
+  // four red eyes (two stacked pairs), black markings across face and body,
+  // ghostly extra arms behind torso, dark crimson kimono.
   const palette = {
-    skin: '#e8c4a0', skinShade: '#b88860',
-    jacket: '#2a0a18', jacketHi: '#4a1228', jacketShade: '#10000c',
-    jacketLine: '#600820', collar: '#000000', belt: '#0a0008',
-    pants: '#1a000c', pantsHi: '#3a0820', shoe: '#000000',
+    skin: '#e8c4a0', skinShade: '#a87050',
+    jacket: '#1a0410', jacketHi: '#3a0a22', jacketShade: '#0a000a',
+    jacketLine: '#800820', collar: '#000000', belt: '#3a0a18',
+    buckle: '#8a0020', cuff: '#0a0008',
+    pants: '#12000a', pantsHi: '#2a0414', pantsShade: '#050004',
+    shoe: '#000000', shoeLace: '#3a0a18',
   };
   drawShadow(ctx);
+  // Ghost arms FIRST (behind torso), low alpha — true Sukuna four-arm look.
+  const ghostY = 48 + pose.body;
+  ctx.globalAlpha = 0.45;
+  drawArm(ctx, 19 + (pose.armA[0] >> 1), ghostY + (pose.armA[1] >> 1), palette, 17);
+  drawArm(ctx, 56 + (pose.armB[0] >> 1), ghostY + (pose.armB[1] >> 1), palette, 17);
+  ctx.globalAlpha = 0.7;
+  // Faint dark aura behind the ghost arms
+  ctx.fillStyle = 'rgba(80,0,20,0.25)';
+  ctx.fillRect(16, 46 + pose.body, 48, 28);
+  ctx.globalAlpha = 1;
   drawLegs(ctx, pose, palette, 'normal');
   drawTorso(ctx, pose, palette, 'normal');
   drawArms(ctx, pose, palette, 'normal');
-  // Two ghostly extra arms behind torso
-  const ey = 50 + pose.body;
-  ctx.globalAlpha = 0.55;
-  drawArm(ctx, 18, ey - 2, palette, 16);
-  drawArm(ctx, 57, ey - 2, palette, 16);
-  ctx.globalAlpha = 1;
+  // Body markings across chest (through open kimono)
+  const cy = 50 + pose.body;
+  px(ctx, 35, cy + 4, 10, 1, '#000000');
+  px(ctx, 36, cy + 8, 8, 1, '#000000');
+  px(ctx, 35, cy + 12, 10, 1, '#000000');
+  px(ctx, 37, cy + 16, 6, 1, '#000000');
+  // Black markings on forearms (kimono sleeves are rolled up visually)
   drawHead(ctx, pose, palette, (cx, x, y) => {
-    // Eyes (red, four-eyed effect: two stacks)
+    // Facial markings — Sukuna's iconic horizontal dark stripes across cheeks
+    // and eye area (two pairs stacked).
+    // Forehead marks
+    px(ctx, x + 6, y + 1, 3, 1, '#000000');
+    px(ctx, x + 11, y + 1, 3, 1, '#000000');
+    // Cheek stripes (horizontal bars above & below eyes)
+    px(ctx, x + 1, y + 4, 6, 1, '#000000');
+    px(ctx, x + 13, y + 4, 6, 1, '#000000');
+    px(ctx, x + 1, y + 11, 6, 1, '#000000');
+    px(ctx, x + 13, y + 11, 6, 1, '#000000');
+    // Lower jaw markings
+    px(ctx, x + 2, y + 15, 5, 1, '#000000');
+    px(ctx, x + 13, y + 15, 5, 1, '#000000');
+    // Eyes — two stacked pairs (four eyes total), blood red with dark sclera.
     if (!pose.blink) {
+      // Upper eye row
+      px(ctx, x + 3, y + 6, 5, 3, '#2a0008');
+      px(ctx, x + 13, y + 6, 5, 3, '#2a0008');
       px(ctx, x + 4, y + 6, 3, 2, '#ff3050');
-      px(ctx, x + 13, y + 6, 3, 2, '#ff3050');
-      px(ctx, x + 4, y + 10, 3, 2, '#ff3050');
-      px(ctx, x + 13, y + 10, 3, 2, '#ff3050');
+      px(ctx, x + 14, y + 6, 3, 2, '#ff3050');
+      px(ctx, x + 5, y + 7, 1, 1, '#ffffff');
+      px(ctx, x + 15, y + 7, 1, 1, '#ffffff');
+      // Lower eye row (second set of eyes)
+      px(ctx, x + 3, y + 9, 5, 3, '#2a0008');
+      px(ctx, x + 13, y + 9, 5, 3, '#2a0008');
+      px(ctx, x + 4, y + 10, 3, 1, '#ff3050');
+      px(ctx, x + 14, y + 10, 3, 1, '#ff3050');
     }
-    // Mouth with extra wide grin
-    px(ctx, x + 6, y + 14, 8, 1, '#400010');
-    // Markings on cheeks
-    px(ctx, x + 2, y + 4, 4, 1, '#000000');
-    px(ctx, x + 14, y + 4, 4, 1, '#000000');
-    px(ctx, x + 2, y + 11, 4, 1, '#000000');
-    px(ctx, x + 14, y + 11, 4, 1, '#000000');
-    // Forehead stripe
-    px(ctx, x + 8, y + 1, 4, 2, '#000000');
+    // Wide demonic grin — bares teeth
+    px(ctx, x + 5, y + 14, 10, 1, '#200008');
+    px(ctx, x + 6, y + 15, 8, 1, '#200008');
+    // Teeth
+    px(ctx, x + 7, y + 14, 1, 1, '#f0d8b0');
+    px(ctx, x + 9, y + 14, 1, 1, '#f0d8b0');
+    px(ctx, x + 11, y + 14, 1, 1, '#f0d8b0');
+    px(ctx, x + 13, y + 14, 1, 1, '#f0d8b0');
   });
-  // Hair: pink with markings (stripes through hair)
+  // Hair: pink with characteristic black tiger-stripe markings running through.
   const hairY = 22 + pose.head;
-  px(ctx, 30, hairY, 20, 6, '#ff8da1');
-  px(ctx, 30, hairY, 20, 2, '#ffb0c0');
-  px(ctx, 32, hairY + 2, 2, 4, '#000000');
-  px(ctx, 38, hairY + 2, 2, 4, '#000000');
-  px(ctx, 44, hairY + 2, 2, 4, '#000000');
+  // Main pink hair
+  px(ctx, 28, hairY, 24, 7, '#e86a84');
+  px(ctx, 28, hairY, 24, 2, '#ff9ab0');
+  // Back hair fringe
+  px(ctx, 28, hairY + 5, 24, 2, '#c84e68');
+  // Stripes (signature markings through hair)
+  px(ctx, 31, hairY - 1, 2, 8, '#000000');
+  px(ctx, 36, hairY - 2, 2, 9, '#000000');
+  px(ctx, 41, hairY - 2, 2, 9, '#000000');
+  px(ctx, 46, hairY - 1, 2, 8, '#000000');
+  // Spikes (mirrors Yuji silhouette but with angular marks)
+  px(ctx, 30, hairY - 3, 2, 3, '#e86a84');
+  px(ctx, 35, hairY - 4, 3, 4, '#e86a84');
+  px(ctx, 40, hairY - 5, 3, 5, '#e86a84');
+  px(ctx, 45, hairY - 4, 3, 4, '#e86a84');
+  // Side locks
+  px(ctx, 27, hairY + 4, 2, 6, '#e86a84');
+  px(ctx, 27, hairY + 4, 1, 6, '#c84e68');
+  px(ctx, 51, hairY + 4, 2, 6, '#e86a84');
+  px(ctx, 52, hairY + 4, 1, 6, '#c84e68');
 }
 
 function drawMahito(ctx, pose) {
+  // Mahito — The Cursed Spirit. Patchwork stitched skin, mismatched eyes
+  // (heterochromia), stitched mouth, blue-grey center-parted hair, lean
+  // casual-dressed human-like frame.
   const palette = {
-    skin: '#d8c8d0', skinShade: '#a89098',
-    jacket: '#3c3848', jacketHi: '#544858', jacketShade: '#1c1a24',
-    jacketLine: '#1a1820', collar: '#1a1820', belt: '#1a1820',
-    pants: '#1a1a26', pantsHi: '#2a2a3a', shoe: '#101018',
+    skin: '#d8c8d0', skinShade: '#9a8894',
+    jacket: '#3c3848', jacketHi: '#524858', jacketShade: '#1c1826',
+    jacketLine: '#14121c', collar: '#14121c', belt: '#14121c',
+    buckle: '#5a5666', cuff: '#1a1822',
+    pants: '#1a1a26', pantsHi: '#2c2c3e', pantsShade: '#0a0a12',
+    shoe: '#0c0c14', shoeLace: '#2a2a36',
   };
   drawShadow(ctx);
   drawLegs(ctx, pose, palette, 'normal');
   drawTorso(ctx, pose, palette, 'normal');
   drawArms(ctx, pose, palette, 'normal');
-  // Stitches across torso (Mahito's patchwork skin showing on hands)
-  const sy = 50 + pose.body;
-  for (let i = 0; i < 3; i++) {
-    px(ctx, 32 + i * 6, sy + 6, 1, 12, '#1a1820');
+  // Visible stitches across torso (sash line + patchwork seams)
+  const sy = 48 + pose.body;
+  // Vertical seam down the chest
+  px(ctx, 40, sy + 4, 1, 20, '#1a1820');
+  // X stitches across the seam
+  for (let i = 0; i < 4; i++) {
+    px(ctx, 39, sy + 6 + i * 4, 3, 1, '#2a2834');
+    px(ctx, 40, sy + 5 + i * 4, 1, 3, '#2a2834');
+  }
+  // Diagonal patchwork seam (shoulder to hip)
+  for (let i = 0; i < 7; i++) {
+    px(ctx, 32 + i, sy + 4 + i, 1, 1, '#1a1820');
+    if (i % 2 === 0) px(ctx, 31 + i, sy + 5 + i, 3, 1, 'rgba(26,24,32,0.7)');
   }
   drawHead(ctx, pose, palette, (cx, x, y) => {
-    // Mismatched eyes (one big, one small)
+    // Facial stitches — Mahito's signature patchwork skin.
+    // Vertical line down left cheek
+    px(ctx, x + 3, y + 3, 1, 11, '#1a1820');
+    for (let i = 0; i < 4; i++) px(ctx, x + 2, y + 4 + i * 3, 3, 1, '#2c2834');
+    // Horizontal forehead stitch
+    px(ctx, x + 5, y + 2, 10, 1, '#1a1820');
+    for (let i = 0; i < 4; i++) px(ctx, x + 5 + i * 3, y + 1, 1, 3, '#2c2834');
+    // Right jaw diagonal
+    px(ctx, x + 16, y + 10, 1, 6, '#1a1820');
+    px(ctx, x + 15, y + 10, 3, 1, '#2c2834');
+    px(ctx, x + 15, y + 13, 3, 1, '#2c2834');
+    // Eyebrows (subtle, almost nonchalant)
+    px(ctx, x + 3, y + 5, 4, 1, '#2a2a36');
+    px(ctx, x + 13, y + 5, 4, 1, '#2a2a36');
+    // Mismatched eyes — left larger teal, right smaller dark purple.
     if (!pose.blink) {
-      px(ctx, x + 3, y + 6, 4, 4, '#ffffff');
-      px(ctx, x + 4, y + 7, 2, 2, '#1a3a40');
-      px(ctx, x + 13, y + 7, 3, 3, '#ffffff');
-      px(ctx, x + 14, y + 8, 1, 1, '#3a1a40');
+      // Left eye (bigger, teal-green)
+      px(ctx, x + 2, y + 7, 6, 5, '#ffffff');
+      px(ctx, x + 3, y + 8, 4, 4, '#4a8088');
+      px(ctx, x + 4, y + 9, 2, 2, '#0a2024');
+      px(ctx, x + 4, y + 8, 1, 1, '#c8f0f0');
+      // Right eye (smaller, darker violet)
+      px(ctx, x + 13, y + 8, 4, 3, '#ffffff');
+      px(ctx, x + 14, y + 8, 2, 3, '#6a4080');
+      px(ctx, x + 14, y + 9, 1, 1, '#1a0828');
+      px(ctx, x + 14, y + 8, 1, 1, '#e0c8f0');
+    } else {
+      px(ctx, x + 3, y + 10, 4, 1, '#0a2024');
+      px(ctx, x + 13, y + 10, 3, 1, '#1a0828');
     }
-    // Stitched mouth (jagged)
-    for (let i = 0; i < 4; i++) px(ctx, x + 6 + i * 2, y + 14 + (i % 2), 1, 1, '#1a1820');
-    // Stitches on cheek
-    px(ctx, x + 2, y + 9, 1, 4, '#1a1820');
-    px(ctx, x + 17, y + 9, 1, 4, '#1a1820');
-    px(ctx, x + 8, y + 2, 4, 1, '#1a1820');
+    // Nose hint
+    px(ctx, x + 10, y + 10, 1, 2, palette.skinShade);
+    // Stitched mouth — jagged zig-zag stitch pattern, wider than Yuji's.
+    const mY = y + 14;
+    px(ctx, x + 5, mY, 11, 1, '#1a1820');
+    // Zig-zag stitches going above and below the lip line
+    for (let i = 0; i < 6; i++) {
+      px(ctx, x + 5 + i * 2, mY + (i % 2 === 0 ? -1 : 1), 1, 1, '#2c2834');
+    }
+    // Dark void inside mouth
+    px(ctx, x + 7, mY, 7, 1, '#000000');
   });
-  // Hair: blue-gray, parted
+  // Hair: center-parted wavy blue-grey, messy and a bit longer than Yuji.
   const hairY = 22 + pose.head;
-  px(ctx, 28, hairY, 24, 5, '#5a708a');
-  px(ctx, 28, hairY, 24, 2, '#7a90aa');
-  px(ctx, 38, hairY + 2, 4, 4, palette.skin); // part
-  // Side bangs
-  px(ctx, 28, hairY + 4, 2, 6, '#5a708a');
-  px(ctx, 50, hairY + 4, 2, 6, '#5a708a');
+  // Main blue-grey mass
+  px(ctx, 27, hairY, 26, 7, '#5a6c88');
+  // Bright highlight band (top-lit)
+  px(ctx, 27, hairY, 26, 2, '#8ea0b8');
+  px(ctx, 29, hairY + 1, 22, 1, '#a8bcd0');
+  // Shadow underlayer
+  px(ctx, 27, hairY + 5, 26, 2, '#3e4c66');
+  // Center part (V-shape revealing skin)
+  px(ctx, 39, hairY + 1, 3, 5, palette.skin);
+  px(ctx, 40, hairY + 3, 1, 3, palette.skinShade);
+  // Wavy bangs descending over brow (asymmetric left/right)
+  px(ctx, 33, hairY + 6, 4, 3, '#5a6c88');
+  px(ctx, 33, hairY + 6, 1, 3, '#3e4c66');
+  px(ctx, 43, hairY + 6, 5, 4, '#5a6c88');
+  px(ctx, 47, hairY + 6, 1, 4, '#3e4c66');
+  // Tufts sticking up on each side (cowlicks)
+  px(ctx, 29, hairY - 2, 3, 2, '#5a6c88');
+  px(ctx, 48, hairY - 2, 3, 2, '#5a6c88');
+  // Side locks covering ears
+  px(ctx, 27, hairY + 5, 2, 6, '#5a6c88');
+  px(ctx, 51, hairY + 5, 2, 6, '#5a6c88');
 }
 
 function drawTodo(ctx, pose) {
+  // Aoi Todo — The Best Friend. Largest sprite, muscular heavyweight build,
+  // short brown hair, vertical scar on left brow, Kyoto Jujutsu High uniform
+  // (lighter blue-grey), Vibraslap prosthetic rendered on the left hand.
   const palette = {
-    skin: '#d8a878', skinShade: '#a87850',
-    jacket: '#2a3848', jacketHi: '#3a4858', jacketShade: '#101820',
-    jacketLine: '#a89048', collar: '#000000', belt: '#5a4020',
-    pants: '#1a2230', pantsHi: '#2a3240', shoe: '#0a0a10',
+    skin: '#d8a878', skinShade: '#a87550',
+    jacket: '#3a4858', jacketHi: '#4e5c6e', jacketShade: '#1a222c',
+    jacketLine: '#c49838', collar: '#0a0a10', belt: '#5a4022',
+    buckle: '#d4a030', cuff: '#1c242e',
+    pants: '#1c242e', pantsHi: '#2c3440', pantsShade: '#080c12',
+    shoe: '#06080c', shoeLace: '#2a2a36',
   };
   drawShadow(ctx);
-  // Larger frame
   drawLegs(ctx, pose, palette, 'big');
   drawTorso(ctx, pose, palette, 'big');
+  // Chest muscle definition (pectorals) over the jacket — brawler look.
+  const cy = 48 + pose.body;
+  px(ctx, 30, cy + 4, 20, 1, palette.jacketShade);
+  px(ctx, 40, cy + 5, 1, 8, palette.jacketShade);
+  px(ctx, 30, cy + 12, 20, 1, palette.jacketShade);
+  // Kyoto emblem on chest (gold trim)
+  px(ctx, 37, cy + 16, 6, 4, palette.jacketLine);
+  px(ctx, 38, cy + 17, 4, 2, '#8a6820');
   drawArms(ctx, pose, palette, 'big');
-  // Bigger head
+  // Larger head with square jaw (Todo's masculine silhouette).
   const top = 22 + pose.head;
-  px(ctx, 28, top, 24, 20, palette.skin);
-  px(ctx, 50, top + 2, 2, 16, palette.skinShade);
-  px(ctx, 30, top + 19, 20, 2, palette.skinShade);
-  // Neck (thick)
-  px(ctx, 34, top + 20, 12, 4, palette.skin);
-  // Face: scar across left eye
+  // Crown
+  px(ctx, 30, top, 20, 1, palette.skin);
+  px(ctx, 28, top + 1, 24, 1, palette.skin);
+  // Main head
+  px(ctx, 27, top + 2, 26, 17, palette.skin);
+  // Top highlight
+  px(ctx, 27, top + 2, 26, 1, lighten(palette.skin, 0.15));
+  px(ctx, 28, top + 3, 5, 8, lighten(palette.skin, 0.08));
+  // Right-side shading
+  px(ctx, 51, top + 2, 2, 16, palette.skinShade);
+  // Square jaw
+  px(ctx, 28, top + 17, 24, 1, palette.skinShade);
+  px(ctx, 30, top + 18, 20, 1, palette.skinShade);
+  px(ctx, 32, top + 19, 16, 1, palette.skinShade);
+  // Thick neck
+  px(ctx, 32, top + 20, 16, 4, palette.skin);
+  px(ctx, 32, top + 20, 16, 1, palette.skinShade);
+  px(ctx, 45, top + 21, 3, 3, palette.skinShade);
+  // Ears
+  px(ctx, 26, top + 8, 2, 5, palette.skin);
+  px(ctx, 26, top + 8, 1, 5, palette.skinShade);
+  px(ctx, 52, top + 8, 2, 5, palette.skin);
+  px(ctx, 53, top + 8, 1, 5, palette.skinShade);
+  // Heavy brows (serious determined look)
+  px(ctx, 30, top + 6, 7, 2, '#2a1810');
+  px(ctx, 43, top + 6, 7, 2, '#2a1810');
+  // Eyes (serious, narrow)
   if (!pose.blink) {
-    px(ctx, 32, top + 8, 3, 3, '#ffffff');
-    px(ctx, 44, top + 8, 3, 3, '#ffffff');
-    px(ctx, 33, top + 9, 1, 1, '#1a1820');
-    px(ctx, 45, top + 9, 1, 1, '#1a1820');
+    // Left eye
+    px(ctx, 31, top + 9, 6, 3, '#ffffff');
+    px(ctx, 32, top + 9, 4, 3, '#5a3820');
+    px(ctx, 33, top + 10, 2, 2, '#1a0a04');
+    px(ctx, 33, top + 9, 1, 1, '#ffffff');
+    // Right eye
+    px(ctx, 43, top + 9, 6, 3, '#ffffff');
+    px(ctx, 44, top + 9, 4, 3, '#5a3820');
+    px(ctx, 45, top + 10, 2, 2, '#1a0a04');
+    px(ctx, 45, top + 9, 1, 1, '#ffffff');
+  } else {
+    px(ctx, 31, top + 10, 6, 1, '#1a0a04');
+    px(ctx, 43, top + 10, 6, 1, '#1a0a04');
   }
-  // Scar
-  px(ctx, 30, top + 6, 1, 8, '#a85040');
-  px(ctx, 31, top + 5, 1, 1, '#a85040');
-  // Mouth (serious)
-  px(ctx, 36, top + 15, 8, 1, '#3a1810');
-  // Hair: short brown
-  px(ctx, 26, top - 2, 28, 6, '#3a2418');
-  px(ctx, 26, top - 2, 28, 2, '#5a4028');
-  // Vibraslap prosthetic on left hand (highlight)
+  // Nose (stronger, masculine)
+  px(ctx, 39, top + 10, 2, 4, palette.skinShade);
+  px(ctx, 39, top + 13, 2, 1, '#8a5830');
+  // Scar — vertical through left brow (JJK anime accurate)
+  px(ctx, 33, top + 4, 1, 10, '#c85040');
+  px(ctx, 33, top + 4, 1, 2, '#ffaa90');
+  px(ctx, 32, top + 6, 1, 1, '#c85040');
+  px(ctx, 34, top + 11, 1, 1, '#c85040');
+  // Mouth (firm set, serious)
+  px(ctx, 35, top + 15, 10, 1, '#2a1008');
+  px(ctx, 37, top + 16, 6, 1, '#4a2818');
+  // Hair: very short dark brown — undercut with defined hairline.
+  const hy = top - 2;
+  // Base dark hair layer
+  px(ctx, 26, hy, 28, 6, '#2a1810');
+  // Highlight (top-lit)
+  px(ctx, 26, hy, 28, 2, '#4a3420');
+  px(ctx, 28, hy + 1, 24, 1, '#5a4228');
+  // Hairline shadow
+  px(ctx, 27, hy + 5, 26, 1, '#1a0c08');
+  // Sides faded tight
+  px(ctx, 26, hy + 6, 2, 4, '#1a0c08');
+  px(ctx, 52, hy + 6, 2, 4, '#1a0c08');
+  // A few subtle texture strands
+  px(ctx, 30, hy + 1, 1, 3, '#1a0c08');
+  px(ctx, 38, hy, 1, 4, '#1a0c08');
+  px(ctx, 46, hy + 1, 1, 3, '#1a0c08');
+  // Vibraslap prosthetic on the left hand — detailed metallic device.
   const armY = 50 + pose.body;
-  const leftHandX = (22 + pose.armA[0]);
-  px(ctx, leftHandX - 1, armY + pose.armA[1] + 17, 7, 6, '#888898');
-  px(ctx, leftHandX - 1, armY + pose.armA[1] + 17, 7, 2, '#a8a8b8');
+  const lhx = (20 + pose.armA[0]);
+  const lhy = armY + pose.armA[1] + 18;
+  // Metal base plate
+  px(ctx, lhx - 2, lhy, 8, 7, '#9a9aa8');
+  px(ctx, lhx - 2, lhy, 8, 1, '#c8c8d4');
+  px(ctx, lhx - 2, lhy + 6, 8, 1, '#5a5a68');
+  // Inner dark cavity
+  px(ctx, lhx, lhy + 2, 4, 3, '#2a2a36');
+  // Slap ball hanging off
+  px(ctx, lhx + 4, lhy + 3, 2, 2, '#c49040');
+  // Rivets
+  px(ctx, lhx - 1, lhy + 1, 1, 1, '#ffffff');
+  px(ctx, lhx + 4, lhy + 1, 1, 1, '#ffffff');
 }
 
 const DRAWERS = {
@@ -474,113 +853,226 @@ function drawPoseFX(ctx, pose, character) {
   const fx = pose.fx || 'slash';
   ctx.save();
   if (fx === 'slash') {
-    // Layered slash trail with crescent shape.
-    ctx.globalAlpha = 0.25;
+    // Cursed-energy slash — multi-stage crescent trail with speed lines
+    // and bright spark leading edge. Layered wide -> narrow -> core.
+    // Outer glow
+    ctx.globalAlpha = 0.18;
     ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 6, s.y - 5, s.w + 12, s.h + 10);
+    ctx.globalAlpha = 0.35;
     ctx.fillRect(s.x - 4, s.y - 3, s.w + 8, s.h + 6);
-    ctx.globalAlpha = 0.55;
+    // Mid glow
+    ctx.globalAlpha = 0.6;
     ctx.fillStyle = c.mid;
     ctx.fillRect(s.x - 2, s.y - 1, s.w + 4, s.h + 2);
-    // Bright crescent
+    // Core crescent (tapered to tip)
     ctx.globalAlpha = 0.95;
     ctx.fillStyle = c.core;
     for (let i = 0; i < s.h; i++) {
       const inset = Math.abs((i - s.h / 2)) | 0;
       ctx.fillRect(s.x + inset, s.y + i, s.w - inset * 2, 1);
     }
-    // Sparkle dots
+    // Bright streaking trail (speed lines behind the blade)
+    ctx.globalAlpha = 0.55;
     ctx.fillStyle = c.mid;
-    ctx.fillRect(s.x + s.w - 2, s.y + (s.h >> 1) - 1, 2, 2);
-    ctx.fillRect(s.x + s.w + 2, s.y + (s.h >> 1) + 2, 1, 1);
-  } else if (fx === 'punch') {
-    // Impact star.
-    const cx = s.x + (s.w >> 1), cy = s.y + (s.h >> 1);
-    ctx.globalAlpha = 0.9;
+    const midY = s.y + (s.h >> 1);
+    ctx.fillRect(s.x - 6, midY - 1, 5, 1);
+    ctx.fillRect(s.x - 10, midY, 4, 1);
+    ctx.fillRect(s.x - 4, midY + 1, 3, 1);
+    // Leading-edge spark (bright white tip)
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(s.x + s.w - 1, midY - 1, 2, 2);
+    ctx.fillRect(s.x + s.w + 1, midY, 1, 1);
+    // Scattered sparkles along the slash
     ctx.fillStyle = c.core;
-    ctx.fillRect(cx - 1, cy - 4, 2, 8);
-    ctx.fillRect(cx - 4, cy - 1, 8, 2);
-    ctx.fillStyle = c.mid;
-    ctx.globalAlpha = 0.7;
-    ctx.fillRect(cx - 2, cy - 6, 4, 2);
-    ctx.fillRect(cx - 2, cy + 4, 4, 2);
-    ctx.fillRect(cx - 6, cy - 2, 2, 4);
-    ctx.fillRect(cx + 4, cy - 2, 2, 4);
-    ctx.globalAlpha = 0.4;
-    ctx.fillStyle = c.edge;
-    ctx.fillRect(s.x, s.y, s.w, s.h);
-  } else if (fx === 'orb') {
-    // Concentric energy orb.
-    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
-    const r = Math.max(s.w, s.h) / 2;
+    ctx.fillRect(s.x + (s.w >> 2), s.y - 2, 1, 1);
+    ctx.fillRect(s.x + (s.w >> 1) + 2, s.y + s.h + 1, 1, 1);
+    ctx.fillRect(s.x + (s.w * 3 >> 2), s.y - 1, 1, 1);
+  } else if (fx === 'punch') {
+    // Big impact star with radial shockwave rings.
+    const cx = s.x + (s.w >> 1), cy = s.y + (s.h >> 1);
+    // Outer ring
     ctx.globalAlpha = 0.3;
-    ctx.fillStyle = c.edge;
-    ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.65;
-    ctx.fillStyle = c.mid;
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = c.edge;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.stroke();
+    // 8-point star
     ctx.globalAlpha = 0.95;
     ctx.fillStyle = c.core;
-    ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
-    // Highlight
+    ctx.fillRect(cx - 1, cy - 6, 2, 12);
+    ctx.fillRect(cx - 6, cy - 1, 12, 2);
+    // Diagonals
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = c.mid;
+    for (let d = 1; d <= 4; d++) {
+      ctx.fillRect(cx - d - 1, cy - d - 1, 2, 2);
+      ctx.fillRect(cx + d, cy - d - 1, 2, 2);
+      ctx.fillRect(cx - d - 1, cy + d, 2, 2);
+      ctx.fillRect(cx + d, cy + d, 2, 2);
+    }
+    // Impact flash center
+    ctx.globalAlpha = 1;
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect((cx - r * 0.3) | 0, (cy - r * 0.3) | 0, 2, 2);
-  } else if (fx === 'beam') {
-    // Long horizontal energy beam with bright core.
+    ctx.fillRect(cx - 2, cy - 2, 4, 4);
+    // Soft edge halo
     ctx.globalAlpha = 0.3;
     ctx.fillStyle = c.edge;
     ctx.fillRect(s.x - 2, s.y - 2, s.w + 4, s.h + 4);
-    ctx.globalAlpha = 0.7;
+  } else if (fx === 'orb') {
+    // Concentric cursed-energy orb with orbiting motes and bright core.
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+    const r = Math.max(s.w, s.h) / 2;
+    // Outer glow halo (big soft)
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = c.edge;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2); ctx.fill();
+    // Mid ring
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = c.edge;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
+    // Main body
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = c.mid;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    // Bright core
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = c.core;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    // Glare highlight (top-left)
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.35, Math.max(1, r * 0.18), 0, Math.PI * 2); ctx.fill();
+    // Orbiting energy motes
+    ctx.fillStyle = c.core;
+    for (let i = 0; i < 4; i++) {
+      const ang = (i / 4) * Math.PI * 2;
+      const mx = cx + Math.cos(ang) * (r + 1);
+      const my = cy + Math.sin(ang) * (r + 1);
+      ctx.fillRect(mx | 0, my | 0, 1, 1);
+    }
+  } else if (fx === 'beam') {
+    // Screen-lengths energy beam with bright core, outer glow, and tip flare.
+    // Outer glow
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 3, s.y - 3, s.w + 6, s.h + 6);
+    ctx.globalAlpha = 0.45;
+    ctx.fillRect(s.x - 1, s.y - 2, s.w + 2, s.h + 4);
+    // Mid layer
+    ctx.globalAlpha = 0.75;
     ctx.fillStyle = c.mid;
     ctx.fillRect(s.x, s.y, s.w, s.h);
+    // Hot core
     ctx.globalAlpha = 1;
     ctx.fillStyle = c.core;
     ctx.fillRect(s.x, s.y + (s.h >> 2), s.w, Math.max(2, s.h >> 1));
-    // Tip flare
-    ctx.fillRect(s.x + s.w, s.y - 1, 3, s.h + 2);
-  } else if (fx === 'shock') {
-    // Ground shockwave: triangles spreading outward.
-    ctx.globalAlpha = 0.3;
+    // Brightest center line
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(s.x, s.y + (s.h >> 1) - 1, s.w, Math.max(1, s.h >> 2));
+    // Tip flare (leading edge explodes outward)
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = c.core;
+    ctx.fillRect(s.x + s.w, s.y - 2, 4, s.h + 4);
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x + s.w + 3, s.y - 1, 2, s.h + 2);
     ctx.fillStyle = c.edge;
-    ctx.fillRect(s.x - 4, s.y, s.w + 8, s.h);
+    ctx.fillRect(s.x + s.w + 5, s.y, 2, s.h);
+    // Trail particles behind the beam origin
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x - 4, s.y + (s.h >> 1), 1, 1);
+    ctx.fillRect(s.x - 7, s.y + (s.h >> 1) - 1, 1, 1);
+    ctx.fillRect(s.x - 10, s.y + (s.h >> 1) + 1, 1, 1);
+  } else if (fx === 'shock') {
+    // Ground shockwave — rising dust, radial cracks, debris particles.
+    // Soft underglow
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = c.edge;
+    ctx.fillRect(s.x - 6, s.y - 1, s.w + 12, s.h + 4);
+    // Core shockwave band
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = c.mid;
     ctx.fillRect(s.x, s.y, s.w, s.h);
+    // Bright top edge
+    ctx.globalAlpha = 1;
     ctx.fillStyle = c.core;
-    for (let i = 0; i < s.w; i += 4) {
-      ctx.fillRect(s.x + i, s.y - 2, 2, 2);
+    ctx.fillRect(s.x, s.y, s.w, 1);
+    // Upward dust/debris particles rising
+    ctx.fillStyle = c.core;
+    for (let i = 0; i < s.w; i += 5) {
+      const h = 2 + ((i * 7) % 4);
+      ctx.fillRect(s.x + i, s.y - h, 1, h);
     }
-    // Cracks
+    // Ground cracks spreading outward
+    ctx.globalAlpha = 0.75;
     ctx.fillStyle = c.edge;
-    ctx.fillRect(s.x + 6, s.y + s.h, 1, 2);
+    ctx.fillRect(s.x - 2, s.y + s.h, 1, 3);
+    ctx.fillRect(s.x + 5, s.y + s.h, 1, 2);
     ctx.fillRect(s.x + s.w - 6, s.y + s.h, 1, 2);
+    ctx.fillRect(s.x + s.w + 1, s.y + s.h, 1, 3);
+    ctx.fillRect(s.x + (s.w >> 1), s.y + s.h, 1, 2);
   } else if (fx === 'flare') {
-    // Aerial all-around aura.
+    // All-around cursed-energy aura burst with radiating spokes + sparks.
     const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
     const r = Math.max(s.w, s.h) / 2;
-    ctx.globalAlpha = 0.25;
+    // Outer halo
+    ctx.globalAlpha = 0.2;
     ctx.fillStyle = c.edge;
-    ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
+    // Mid body
+    ctx.globalAlpha = 0.65;
     ctx.fillStyle = c.mid;
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-    // Spokes radiating
+    // Inner glow
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = c.core;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    // 8 radiating spokes of energy
+    ctx.globalAlpha = 1;
     ctx.fillStyle = c.core;
     for (let a = 0; a < 8; a++) {
       const ang = (a / 8) * Math.PI * 2;
-      const x = cx + Math.cos(ang) * r;
-      const y = cy + Math.sin(ang) * r;
-      ctx.fillRect((x - 1) | 0, (y - 1) | 0, 2, 2);
+      for (let t = 0; t < 3; t++) {
+        const x = cx + Math.cos(ang) * (r + t * 2);
+        const y = cy + Math.sin(ang) * (r + t * 2);
+        ctx.fillRect((x - 1) | 0, (y - 1) | 0, 2, 2);
+      }
+    }
+    // Scattered sparks beyond the aura
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = c.mid;
+    for (let a = 0; a < 6; a++) {
+      const ang = (a / 6) * Math.PI * 2 + 0.4;
+      const x = cx + Math.cos(ang) * (r + 6);
+      const y = cy + Math.sin(ang) * (r + 6);
+      ctx.fillRect(x | 0, y | 0, 1, 1);
     }
   } else if (fx === 'sweep') {
-    // Wide low ground sweep.
-    ctx.globalAlpha = 0.35;
+    // Wide ground sweep with motion lines trailing behind.
+    // Dust cloud underglow
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = c.edge;
-    ctx.fillRect(s.x - 2, s.y - 1, s.w + 4, s.h + 2);
+    ctx.fillRect(s.x - 3, s.y - 2, s.w + 6, s.h + 4);
+    // Core sweep band
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = c.mid;
     ctx.fillRect(s.x, s.y, s.w, s.h);
+    // Bright top line (motion highlight)
+    ctx.globalAlpha = 1;
     ctx.fillStyle = c.core;
-    ctx.fillRect(s.x + 2, s.y + 1, s.w - 4, Math.max(1, s.h - 3));
+    ctx.fillRect(s.x + 1, s.y, s.w - 2, Math.max(1, s.h - 2));
+    // Motion lines trailing back
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = c.mid;
+    ctx.fillRect(s.x - 5, s.y + (s.h >> 1), 4, 1);
+    ctx.fillRect(s.x - 8, s.y + (s.h >> 1) + 1, 3, 1);
+    // Dust particles kicking up
+    ctx.fillStyle = c.core;
+    for (let i = 0; i < s.w; i += 6) {
+      ctx.fillRect(s.x + i + 2, s.y - 2, 1, 1);
+    }
   }
   ctx.globalAlpha = 1;
   ctx.restore();
