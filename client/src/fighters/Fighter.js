@@ -7,11 +7,18 @@
 //     hitbox: { x, y, w, h, damage, knockback, angle, ignoresInfinity, meterKind },
 //     // OR multiple timed windows, e.g. for Playful Cloud 3-hit combos:
 //     windows: [ { from, to, hitbox } ],
+//     smash: true,                        // allows hold-to-charge (up to 60 frames)
+//     aerial: true,                       // flags aerial for landing-lag logic
+//     landingLag: N,                      // per-move landing lag when aerial cuts short
 //     ceCost: 10, meterKind: 'SPECIAL',
-//     onStart(fighter) { ... },    // fires on attack start (pre-startup)
-//     onFrame(fighter, frame, world) { ... }, // fires each action-tick frame
+//     onStart(fighter) { ... },           // fires on attack start (pre-startup)
+//     onFrame(fighter, frame, world) { ... },   // fires each action-tick frame
 //     onHit(attacker, defender, world, hb) { ... }, // post-hit hook
 //   }
+//
+// Hitbox geometry can be built from the sprite's visible swing rect — see
+// `hitboxFromPose` in SpriteSheet.js. This keeps what you see aligned with
+// what hits, so each character's attacks map 1:1 to their animations.
 //
 // When `windows` is supplied, `startup/active/endlag` are still used for the
 // default anim phase (startup -> wind, active -> hit) and total timing (total
@@ -25,6 +32,25 @@ import { applyGravity, resolveStageCollision, checkBlastZones, aabbOverlap } fro
 import { regenCE, spendCE, hasCE } from '../systems/CursedEnergy.js';
 import { applyHit } from '../systems/DamageSystem.js';
 import { DomainMeter, DOMAIN_BY_FIGHTER } from '../systems/DomainExpansion.js';
+
+// Smash charge tuning: a held smash input charges up to +70% damage / KB.
+const SMASH_CHARGE_MAX_FRAMES = 60;
+const SMASH_CHARGE_MIN_MULT   = 1.0;
+const SMASH_CHARGE_MAX_MULT   = 1.7;
+
+// Dodge / roll tuning.
+const ROLL_FRAMES        = 28;
+const ROLL_INVULN_FRAMES = 20;
+const ROLL_SPEED         = 5.2;
+const SPOT_DODGE_FRAMES  = 22;
+const SPOT_INVULN_FRAMES = 16;
+const AIR_DODGE_FRAMES   = 30;
+const AIR_DODGE_INVULN   = 22;
+const AIR_DODGE_SPEED    = 4.5;
+
+// Grab / throw tuning.
+const GRAB_HOLD_MAX      = 120;
+const THROW_BASE_KB      = 40;
 
 let nextId = 1;
 
@@ -98,6 +124,26 @@ export class Fighter {
     // Per-attack hitbox override — the last spawned world-space hitbox box so
     // the renderer can draw the swing VFX on top of the real hurtbox.
     this._lastWorldHitbox = null;
+    // Smash charge state: when >=0 we're holding the smash and `startAttack`
+    // has already positioned us in startup; releasing ATTACK/SMASH fires.
+    this._smashCharge = -1;
+    this._smashChargeMove = null;
+    this._smashChargeDir = 1;
+    // Dodge / roll state: timer counts down while dodging; invuln handled
+    // through `invulnFrames`. `_dodgeKind` drives animation.
+    this._dodgeTimer = 0;
+    this._dodgeKind = null; // 'roll' | 'spot' | 'air'
+    // Grab: when a grab lands, attacker enters 'grab_hold' and caches target.
+    this._grabTarget = null;
+    this._grabTimer = 0;
+    this._grabbedBy = null;
+    this._grabbedTimer = 0;
+    // Landing-lag bookkeeping: if an aerial ends while we're still airborne
+    // or if we land during active/endlag, apply a short landing-lag window.
+    this._landingLag = 0;
+    this._wasAirborne = false;
+    // Consecutive-attack zone flag (Todo passive + combo meter growth).
+    this._comboHits = 0;
   }
 
   init(world) {
@@ -141,6 +187,23 @@ export class Fighter {
     regenCE(this);
     this.domainMeter.tick();
 
+    // Being grabbed: the grabber owns our position + state until released.
+    if (this._grabbedBy) {
+      this._grabbedTimer--;
+      if (this._grabbedTimer <= 0 || this._grabbedBy.ko || this._grabbedBy.state !== 'grab_hold') {
+        this._grabbedBy = null;
+        this._grabbedTimer = 0;
+      } else {
+        const g = this._grabbedBy;
+        this.x = g.x + 30 * g.facing;
+        this.y = g.y;
+        this.vx = 0; this.vy = 0;
+        this.state = 'hurt_grab';
+        this._afterMove(world);
+        return;
+      }
+    }
+
     if (this.domainMeter.ready() && isDomainInput(input) && this.state !== 'domain_cast' && this.hitstun === 0) {
       this.activateDomain(world);
       return;
@@ -152,13 +215,57 @@ export class Fighter {
       return;
     }
 
+    // Dodge / roll state: burn timer, then return to idle. Invuln handled
+    // by the normal invulnFrames path above.
+    if (this._dodgeTimer > 0) {
+      this._dodgeTimer--;
+      this.vx *= (this._dodgeKind === 'roll') ? 0.92 : 0.80;
+      if (this._dodgeTimer === 0) {
+        this._dodgeKind = null;
+        this.state = 'idle';
+      }
+      this._afterMove(world);
+      return;
+    }
+
+    // Grab-hold: attacker holds opponent until input chooses a throw or the
+    // grab times out. We still drain CE regen / domain meter normally.
+    if (this.state === 'grab_hold') {
+      this._tickGrabHold(input, world);
+      this._afterMove(world);
+      return;
+    }
+
+    // Smash charge: we're sitting in the smash startup pose until the player
+    // releases (or max charge hits). Movement is locked.
+    if (this._smashCharge >= 0) {
+      this._tickSmashCharge(input, world);
+      this._afterMove(world);
+      return;
+    }
+
     if (this.state === 'attack') {
       this._tickAttack(world);
       this._afterMove(world);
       return;
     }
 
+    // Landing lag: can't act except shield.
+    if (this._landingLag > 0) {
+      this._landingLag--;
+      this.vx *= 0.78;
+      this.state = 'landlag';
+      this._afterMove(world);
+      return;
+    }
+
     if (this.shieldBroken) {
+      this._afterMove(world);
+      return;
+    }
+
+    // Shield + direction press triggers a dodge (roll grounded, airdodge aerial).
+    if (this._tryDodge(input)) {
       this._afterMove(world);
       return;
     }
@@ -169,12 +276,30 @@ export class Fighter {
   }
 
   _afterMove(world) {
+    const wasAir = !this.grounded;
     applyGravity(this);
     resolveStageCollision(this, world.stage);
     if (checkBlastZones(this)) this._ko();
     if (!this.facingLocked && Math.abs(this.vx) > 0.1 && this.state !== 'attack') {
       this.facing = this.vx > 0 ? 1 : -1;
     }
+    // Aerial → grounded transition. If we land while still inside an aerial
+    // attack, interrupt the attack and apply landing lag. Otherwise apply
+    // a small touch-down window so flat landings don't feel instant.
+    if (wasAir && this.grounded) {
+      if (this.state === 'attack' && this.currentMove && this.currentMove.aerial) {
+        const m = this.currentMove;
+        const lag = m.landingLag ?? (m.autocancel && this.actionTimer >= (m.autocancel) ? 4 : 12);
+        this._landingLag = lag;
+        this.state = 'landlag';
+        this.currentMove = null;
+        this.activeHitbox = null;
+        this.facingLocked = false;
+      } else if (this._landingLag === 0) {
+        this._landingLag = 4;  // universal 4-frame land
+      }
+    }
+    this._wasAirborne = !this.grounded;
     this._updateAnim();
   }
 
@@ -244,6 +369,7 @@ export class Fighter {
       const tilt = im ? im.tiltDir(this.playerIndex) : { x: 0, y: 0 };
       const smash = im ? im.smashFlick(this.playerIndex) : { x: 0, y: 0 };
       let moveName;
+      let isSmash = false;
       if (!this.grounded) {
         if (up || tilt.y < 0) moveName = 'uair';
         else if (down || tilt.y > 0) moveName = 'dair';
@@ -251,6 +377,7 @@ export class Fighter {
         else if (dirH !== 0) moveName = (dirH === this.facing ? 'fair' : 'bair');
         else moveName = 'nair';
       } else if (smash.x !== 0 || smash.y !== 0) {
+        isSmash = true;
         if (smash.y < 0) moveName = 'usmash';
         else if (smash.y > 0) moveName = 'dsmash';
         else { moveName = 'fsmash'; this.facing = smash.x; }
@@ -264,7 +391,11 @@ export class Fighter {
         moveName = 'ftilt';
         this.facing = dirH;
       } else moveName = 'jab';
-      this.startAttack(moveName);
+      if (isSmash && this.moves[moveName] && this.moves[moveName].smash) {
+        this._beginSmashCharge(moveName);
+      } else {
+        this.startAttack(moveName);
+      }
       return;
     }
 
@@ -281,13 +412,13 @@ export class Fighter {
     if (pressedGrab) this.startAttack('grab');
   }
 
-  startAttack(name) {
+  startAttack(name, opts = {}) {
     const move = this.moves[name];
     if (!move) return;
     if (move.ceCost && !hasCE(this, move.ceCost)) return;
     if (move.ceCost) spendCE(this, move.ceCost);
     this.state = 'attack';
-    this.currentMove = { ...move, name };
+    this.currentMove = { ...move, name, _smashMult: opts.smashCharge || 1 };
     this.actionTimer = 0;
     this.alreadyHit.clear();
     this._activeWindowIdx = -1;
@@ -316,6 +447,12 @@ export class Fighter {
       if (this.alreadyHit.has(dedupeKey)) continue;
       const ob = { x: other.x - other.width / 2, y: other.y - other.height, w: other.width, h: other.height };
       if (aabbOverlap(hb, ob)) {
+        // Grabs: short-circuit into the grab-hold state and skip applyHit.
+        if (move.grab) {
+          this.alreadyHit.add(dedupeKey);
+          if (!other.shielding) this._onGrabHit(other);
+          return;
+        }
         if (move.onHit) move.onHit(this, other, world, hb);
         const did = applyHit(this, other, hb);
         if (did && !other.shielding) {
@@ -328,7 +465,9 @@ export class Fighter {
             this.zoneBuff = 180;
           }
           world.particles.hitspark(hb.x + hb.w * 0.5, hb.y + hb.h * 0.5);
-          world.camera.shake(hb.damage >= 12 ? 10 : 6, hb.damage >= 12 ? 8 : 5);
+          // Bigger screen shake for smashes and charged hits.
+          const heavy = hb.damage >= 14 || (move._smashMult && move._smashMult > 1.2);
+          world.camera.shake(heavy ? 12 : 6, heavy ? 10 : 5);
         } else if (did && other.shielding) {
           this.alreadyHit.add(dedupeKey);
         }
@@ -346,6 +485,17 @@ export class Fighter {
 
     if (m.onFrame) m.onFrame(this, this.actionTimer, world);
 
+    const smashMult = m._smashMult || 1;
+    const scaleHb = (hbDef) => {
+      if (!hbDef) return hbDef;
+      if (smashMult === 1) return hbDef;
+      return {
+        ...hbDef,
+        damage: (hbDef.damage || 0) * smashMult,
+        knockback: (hbDef.knockback || 0) * smashMult,
+      };
+    };
+
     // Multi-window hitbox path: windows: [{ from, to, hitbox, meterKind, onHit }]
     if (m.windows && m.windows.length) {
       this.activeHitbox = null;
@@ -356,11 +506,13 @@ export class Fighter {
           if (!hbDef) continue;
           // Each window gets its own dedupe key so every hit in a combo lands.
           const windowKey = i;
-          const hb = this._buildHitboxWorld(hbDef);
+          const hb = this._buildHitboxWorld(scaleHb(hbDef));
           // allow per-window onHit override
           const syntheticMove = {
             meterKind: w.meterKind || m.meterKind,
             onHit: w.onHit || m.onHit,
+            grab: w.grab || m.grab,
+            _smashMult: smashMult,
           };
           this._processHitbox(world, hb, syntheticMove, windowKey);
           this._activeWindowIdx = i;
@@ -370,7 +522,7 @@ export class Fighter {
     } else if (this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active) {
       const hbDef = typeof m.hitbox === 'function' ? m.hitbox(this) : m.hitbox;
       if (hbDef) {
-        const hb = this._buildHitboxWorld(hbDef);
+        const hb = this._buildHitboxWorld(scaleHb(hbDef));
         this._processHitbox(world, hb, m, null);
       }
     } else {
@@ -389,6 +541,181 @@ export class Fighter {
       this.currentMove = null;
       this.facingLocked = false;
     }
+  }
+
+  // =========================================================
+  // Smash attacks: hold-to-charge. The player stays in the move's startup
+  // pose for up to SMASH_CHARGE_MAX_FRAMES frames. Releasing ATTACK (or
+  // re-flicking direction) fires the attack with damage/KB multiplied by
+  // 1.0..1.7 depending on hold time.
+  // =========================================================
+  _beginSmashCharge(moveName) {
+    const move = this.moves[moveName];
+    if (!move) return;
+    if (move.ceCost && !hasCE(this, move.ceCost)) return;
+    this._smashCharge = 0;
+    this._smashChargeMove = moveName;
+    this._smashChargeDir = this.facing;
+    this.state = 'attack';
+    this.currentMove = { ...move, name: moveName, _charging: true };
+    this.actionTimer = 0;
+    this.alreadyHit.clear();
+    this.activeHitbox = null;
+    this._lastWorldHitbox = null;
+    this.facingLocked = true;
+  }
+
+  _tickSmashCharge(input, world) {
+    this.vx *= 0.7;
+    const stillHolding = isPressed(input, INPUT.ATTACK);
+    this._smashCharge++;
+    if (!stillHolding || this._smashCharge >= SMASH_CHARGE_MAX_FRAMES) {
+      const t = Math.min(1, this._smashCharge / SMASH_CHARGE_MAX_FRAMES);
+      const mult = SMASH_CHARGE_MIN_MULT + (SMASH_CHARGE_MAX_MULT - SMASH_CHARGE_MIN_MULT) * t;
+      const moveName = this._smashChargeMove;
+      this._smashCharge = -1;
+      this._smashChargeMove = null;
+      this.currentMove = null;
+      this.actionTimer = 0;
+      this.startAttack(moveName, { smashCharge: mult });
+    }
+  }
+
+  // =========================================================
+  // Dodges: shield+direction during grounded → roll; shield alone → spot
+  // dodge; shield+direction airborne → airdodge. All grant invuln.
+  // =========================================================
+  _tryDodge(input) {
+    const shield = isPressed(input, INPUT.SHIELD);
+    const pShield = isPressed(this._prevInput, INPUT.SHIELD);
+    const shieldJustPressed = shield && !pShield;
+    if (!shieldJustPressed) return false;
+    const left  = isPressed(input, INPUT.LEFT);
+    const right = isPressed(input, INPUT.RIGHT);
+    const up    = isPressed(input, INPUT.UP);
+    const down  = isPressed(input, INPUT.DOWN);
+    const dirH  = (right ? 1 : 0) - (left ? 1 : 0);
+    if (this.grounded) {
+      if (dirH !== 0) {
+        this._dodgeKind = 'roll';
+        this._dodgeTimer = ROLL_FRAMES;
+        this.invulnFrames = Math.max(this.invulnFrames, ROLL_INVULN_FRAMES);
+        this.vx = dirH * ROLL_SPEED;
+        this.state = 'dodge';
+        this.facingLocked = true;
+        return true;
+      }
+      if (down) {
+        this._dodgeKind = 'spot';
+        this._dodgeTimer = SPOT_DODGE_FRAMES;
+        this.invulnFrames = Math.max(this.invulnFrames, SPOT_INVULN_FRAMES);
+        this.vx = 0;
+        this.state = 'dodge';
+        return true;
+      }
+      return false;
+    }
+    if (this.airdodgeUsed) return false;
+    this.airdodgeUsed = true;
+    this._dodgeKind = 'air';
+    this._dodgeTimer = AIR_DODGE_FRAMES;
+    this.invulnFrames = Math.max(this.invulnFrames, AIR_DODGE_INVULN);
+    let dx = dirH, dy = 0;
+    if (up) dy -= 1;
+    if (down) dy += 1;
+    const mag = Math.hypot(dx, dy);
+    if (mag === 0) { dx = 0; dy = 0; } else { dx /= mag; dy /= mag; }
+    this.vx = dx * AIR_DODGE_SPEED;
+    this.vy = dy * AIR_DODGE_SPEED;
+    this.state = 'dodge';
+    return true;
+  }
+
+  // =========================================================
+  // Grab → hold → throw. When a grab lands, defender is locked; attacker
+  // chooses a direction + presses ATTACK to release a throw.
+  // =========================================================
+  _onGrabHit(target) {
+    this._grabTarget = target;
+    this._grabTimer = GRAB_HOLD_MAX;
+    this.state = 'grab_hold';
+    target._grabbedBy = this;
+    target._grabbedTimer = GRAB_HOLD_MAX;
+    target.hitstun = 0;
+    target.vx = 0; target.vy = 0;
+    this.facingLocked = true;
+    this.currentMove = null;
+    this.actionTimer = 0;
+  }
+
+  _tickGrabHold(input, world) {
+    this._grabTimer--;
+    this.vx *= 0.85;
+    if (!this._grabTarget || this._grabTarget.ko || this._grabTimer <= 0) {
+      this._releaseGrab();
+      return;
+    }
+    const left  = isPressed(input, INPUT.LEFT);
+    const right = isPressed(input, INPUT.RIGHT);
+    const up    = isPressed(input, INPUT.UP);
+    const down  = isPressed(input, INPUT.DOWN);
+    const pAtk  = (input & INPUT.ATTACK) && !(this._prevInput & INPUT.ATTACK);
+    const pSp   = (input & INPUT.SPECIAL) && !(this._prevInput & INPUT.SPECIAL);
+    const pThrow= pAtk || pSp;
+    if (!pThrow) return;
+    let dir = 'f';
+    if (up) dir = 'u';
+    else if (down) dir = 'd';
+    else if (right && this.facing < 0) dir = 'b';
+    else if (left && this.facing > 0) dir = 'b';
+    else dir = 'f';
+    this._executeThrow(dir, world);
+  }
+
+  _executeThrow(dir, world) {
+    const target = this._grabTarget;
+    if (!target) { this._releaseGrab(); return; }
+    const profile = this._throwProfile(dir);
+    const hb = {
+      x: target.x, y: target.y - target.height * 0.5,
+      w: 40, h: 40,
+      damage: profile.damage, knockback: profile.knockback,
+      angle: profile.angle, ignoresInfinity: true,
+    };
+    if (world && world.particles) {
+      world.particles.burst(target.x, target.y - 40, '#ffffff', 18, 4);
+    }
+    if (world && world.camera) world.camera.shake(8, 6);
+    // Free the grabbed state so applyHit launches cleanly.
+    target._grabbedBy = null;
+    target._grabbedTimer = 0;
+    target.invulnFrames = 0;
+    applyHit(this, target, hb);
+    this.domainMeter.addOnHit('THROW');
+    target.domainMeter.addOnDamageTaken(hb.damage);
+    this._releaseGrab();
+    this._landingLag = 6; // short recovery after the throw
+  }
+
+  _throwProfile(dir) {
+    switch (dir) {
+      case 'u': return { damage: 9,  knockback: THROW_BASE_KB + 22, angle: 88  };
+      case 'd': return { damage: 7,  knockback: THROW_BASE_KB + 8,  angle: 25  };
+      case 'b': return { damage: 10, knockback: THROW_BASE_KB + 32, angle: 135 };
+      case 'f':
+      default:  return { damage: 8,  knockback: THROW_BASE_KB + 22, angle: 40  };
+    }
+  }
+
+  _releaseGrab() {
+    if (this._grabTarget) {
+      this._grabTarget._grabbedBy = null;
+      this._grabTarget._grabbedTimer = 0;
+    }
+    this._grabTarget = null;
+    this._grabTimer = 0;
+    this.state = 'idle';
+    this.facingLocked = false;
   }
 
   // Hitstun: light DI influence via stick direction. Keeps the fighter
@@ -437,9 +764,18 @@ export class Fighter {
   _updateAnim() {
     const prevAnim = this.anim;
     if (this.ko) this.anim = 'hurt';
+    else if (this.state === 'dodge') {
+      this.anim = this._dodgeKind === 'roll' ? 'roll'
+                : this._dodgeKind === 'air'  ? 'airdodge'
+                : 'spotdodge';
+    }
+    else if (this.state === 'grab_hold') this.anim = 'grab_hold';
+    else if (this.state === 'hurt_grab') this.anim = 'hurt';
+    else if (this.state === 'landlag') this.anim = 'land';
     else if (this.state === 'attack') {
       const m = this.currentMove;
       if (!m) this.anim = 'idle';
+      else if (m._charging) this.anim = `${m.name}_wind`;
       else {
         const inWind = this.actionTimer < (m.startup || 0);
         const inActive = m.windows
@@ -452,6 +788,8 @@ export class Fighter {
             if (inWind) this.anim = 'jab_wind';
             else if (inActive) this.anim = (this.actionTimer % 4 < 2) ? 'jab_hit' : 'jab_hit2';
             else this.anim = 'jab_hit';
+          } else if (m.name === 'fsmash' && (m._smashMult || 1) > 1.3 && !inWind) {
+            this.anim = 'fsmash_max';
           } else {
             this.anim = inWind ? `${m.name}_wind` : `${m.name}_hit`;
           }

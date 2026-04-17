@@ -10,6 +10,7 @@ import { Fighter } from './Fighter.js';
 import { FIGHTER_STATS } from '../../../shared/FighterData.js';
 import { UnlimitedVoid } from '../systems/DomainExpansion.js';
 import { INPUT, isPressed } from '../../../shared/InputCodes.js';
+import { hitboxFromPose } from '../rendering/SpriteSheet.js';
 
 export class GojoFighter extends Fighter {
   constructor(opts) {
@@ -30,48 +31,48 @@ export class GojoFighter extends Fighter {
   _moves() {
     return {
       // Refined martial-arts jab. Low knockback + shallow angle = combo starter
-      // into ftilt, usmash, or aerials.
+      // into ftilt, usmash, or aerials. Hitbox aligns to the visible swing.
       jab: {
         startup: 3, active: 3, endlag: 8,
-        hitbox: { x: 30, y: 50, w: 36, h: 20, damage: 3, knockback: 16, angle: 35 },
+        hitbox: hitboxFromPose('jab_hit', { damage: 3, knockback: 16, angle: 35, pad: 4 }),
         meterKind: 'JAB',
       },
 
       // Forward tilt — stepping side kick with CE trail.
       ftilt: {
         startup: 6, active: 4, endlag: 12,
-        hitbox: { x: 42, y: 46, w: 52, h: 22, damage: 8, knockback: 42, angle: 40 },
+        hitbox: hitboxFromPose('ftilt_hit', { damage: 8, knockback: 42, angle: 40, pad: 4 }),
         meterKind: 'TILT',
       },
       // Up tilt — rising palm. Launch angle of 85° for juggle routes.
       utilt: {
         startup: 5, active: 4, endlag: 11,
-        hitbox: { x: 8, y: 88, w: 46, h: 34, damage: 7, knockback: 38, angle: 85 },
+        hitbox: hitboxFromPose('utilt_hit', { damage: 7, knockback: 38, angle: 85, pad: 4 }),
         meterKind: 'TILT',
       },
       // Down tilt — low sweep to trip, combos into fair.
       dtilt: {
         startup: 4, active: 3, endlag: 10,
-        hitbox: { x: 34, y: 10, w: 52, h: 16, damage: 5, knockback: 22, angle: 28 },
+        hitbox: hitboxFromPose('dtilt_hit', { damage: 5, knockback: 22, angle: 28, pad: 4 }),
         meterKind: 'TILT',
       },
 
       // Forward Smash: charged palm thrust, one of Gojo's KO options.
       fsmash: {
-        startup: 14, active: 4, endlag: 24,
-        hitbox: { x: 48, y: 50, w: 58, h: 30, damage: 16, knockback: 92, angle: 42 },
+        startup: 14, active: 4, endlag: 24, smash: true,
+        hitbox: hitboxFromPose('fsmash_hit', { damage: 16, knockback: 92, angle: 42, pad: 6 }),
         meterKind: 'SMASH',
       },
       // Up Smash: Infinity burst above. Huge vertical box for anti-air KOs.
       usmash: {
-        startup: 10, active: 6, endlag: 22,
-        hitbox: { x: 0, y: 92, w: 74, h: 70, damage: 15, knockback: 88, angle: 88 },
+        startup: 10, active: 6, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('usmash_hit', { damage: 15, knockback: 88, angle: 88, pad: 6 }),
         meterKind: 'SMASH',
       },
       // Down Smash: dual palms slam creating a horizontal shockwave.
       dsmash: {
-        startup: 12, active: 5, endlag: 22,
-        hitbox: { x: 0, y: 6, w: 130, h: 26, damage: 13, knockback: 72, angle: 28 },
+        startup: 12, active: 5, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('dsmash_hit', { damage: 13, knockback: 72, angle: 28, pad: 4 }),
         meterKind: 'SMASH',
       },
 
@@ -127,7 +128,7 @@ export class GojoFighter extends Fighter {
       // Up Special — Blue Boost. Launches Gojo at an angle, retains momentum.
       upspecial: {
         startup: 5, active: 8, endlag: 20, ceCost: 10, meterKind: 'SPECIAL',
-        hitbox: { x: 0, y: 80, w: 48, h: 60, damage: 6, knockback: 48, angle: 85 },
+        hitbox: hitboxFromPose('upspecial_hit', { damage: 6, knockback: 48, angle: 85, pad: 4 }),
         onStart(f) {
           // Angle launch: up + small horizontal from held direction.
           const im = f.world && f.world.input;
@@ -148,7 +149,9 @@ export class GojoFighter extends Fighter {
       // crush field. Successful counter reflects projectiles and pushes.
       downspecial: {
         startup: 4, active: 22, endlag: 14, ceCost: 18, meterKind: 'SPECIAL',
-        hitbox: { x: 0, y: 40, w: 110, h: 110, damage: 5, knockback: 28, angle: 80, ignoresInfinity: true },
+        hitbox: hitboxFromPose('downspecial_hit', {
+          damage: 5, knockback: 28, angle: 80, ignoresInfinity: true, pad: 8,
+        }),
         onStart(f) {
           f._counterActive = 20;
           f.invulnFrames = Math.max(f.invulnFrames, 10);
@@ -164,38 +167,39 @@ export class GojoFighter extends Fighter {
         },
       },
 
-      // Aerials — snappy, disjointed, combo-oriented.
+      // Aerials — snappy, disjointed, combo-oriented. Autocancel after active
+      // lets Gojo land, short-hop combo into smash or grab.
       nair: {
-        startup: 4, active: 10, endlag: 10,
-        hitbox: { x: 0, y: 50, w: 72, h: 52, damage: 7, knockback: 38, angle: 50 },
+        startup: 4, active: 10, endlag: 10, aerial: true, landingLag: 8, autocancel: 16,
+        hitbox: hitboxFromPose('nair', { damage: 7, knockback: 38, angle: 50, pad: 4 }),
         meterKind: 'AERIAL',
       },
       fair: {
-        startup: 7, active: 4, endlag: 12,
-        hitbox: { x: 42, y: 52, w: 52, h: 30, damage: 10, knockback: 52, angle: 44 },
+        startup: 7, active: 4, endlag: 12, aerial: true, landingLag: 12,
+        hitbox: hitboxFromPose('fair', { damage: 10, knockback: 52, angle: 44, pad: 4 }),
         meterKind: 'AERIAL',
       },
       bair: {
-        startup: 5, active: 4, endlag: 10,
-        hitbox: { x: -42, y: 52, w: 52, h: 30, damage: 13, knockback: 68, angle: 135 },
+        startup: 5, active: 4, endlag: 10, aerial: true, landingLag: 10,
+        hitbox: hitboxFromPose('bair', { damage: 13, knockback: 68, angle: 135, pad: 4 }),
         meterKind: 'AERIAL',
       },
       // Upward finger-point Blue pulse — combos into itself at low %.
       uair: {
-        startup: 4, active: 5, endlag: 10,
-        hitbox: { x: 0, y: 104, w: 52, h: 44, damage: 8, knockback: 44, angle: 88 },
+        startup: 4, active: 5, endlag: 10, aerial: true, landingLag: 8,
+        hitbox: hitboxFromPose('uair', { damage: 8, knockback: 44, angle: 88, pad: 4 }),
         meterKind: 'AERIAL',
       },
       // Down-air meteor spike — Gojo's KO confirm offstage.
       dair: {
-        startup: 10, active: 5, endlag: 18,
-        hitbox: { x: 0, y: 0, w: 42, h: 42, damage: 12, knockback: 62, angle: 270 },
+        startup: 10, active: 5, endlag: 18, aerial: true, landingLag: 18,
+        hitbox: hitboxFromPose('dair', { damage: 12, knockback: 62, angle: 270, pad: 4 }),
         meterKind: 'AERIAL',
       },
 
       grab: {
-        startup: 6, active: 3, endlag: 16,
-        hitbox: { x: 36, y: 60, w: 40, h: 32, damage: 0, knockback: 0, angle: 0 },
+        startup: 6, active: 3, endlag: 16, grab: true,
+        hitbox: hitboxFromPose('grab', { damage: 0, knockback: 0, angle: 0, pad: 6 }),
         meterKind: 'THROW',
       },
     };

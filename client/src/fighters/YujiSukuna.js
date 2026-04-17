@@ -8,6 +8,7 @@ import { FIGHTER_STATS } from '../../../shared/FighterData.js';
 import { BLACK_FLASH } from '../systems/BlackFlash.js';
 import { MalevolentShrine } from '../systems/DomainExpansion.js';
 import { INPUT, isPressed } from '../../../shared/InputCodes.js';
+import { hitboxFromPose } from '../rendering/SpriteSheet.js';
 
 export class YujiSukunaFighter extends Fighter {
   constructor(opts) {
@@ -76,57 +77,57 @@ export class YujiSukunaFighter extends Fighter {
       // Rapid 5-ish hit jab combo. Jab 1 starts a combo.
       jab: {
         startup: 3, active: 3, endlag: 7,
-        hitbox: { x: 28, y: 52, w: 34, h: 20, damage: 3, knockback: 14, angle: 35 },
+        hitbox: hitboxFromPose('jab_hit', { damage: 3, knockback: 14, angle: 35, pad: 4 }),
         meterKind: 'JAB',
       },
       ftilt: {
         startup: 5, active: 4, endlag: 11,
-        hitbox: { x: 38, y: 50, w: 46, h: 22, damage: 7, knockback: 40, angle: 38 },
+        hitbox: hitboxFromPose('ftilt_hit', { damage: 7, knockback: 40, angle: 38, pad: 4 }),
         meterKind: 'TILT',
       },
       // Rising uppercut — juggle starter.
       utilt: {
         startup: 4, active: 4, endlag: 10,
-        hitbox: { x: 6, y: 80, w: 52, h: 44, damage: 8, knockback: 42, angle: 88 },
+        hitbox: hitboxFromPose('utilt_hit', { damage: 8, knockback: 42, angle: 88, pad: 6 }),
         meterKind: 'TILT',
       },
       dtilt: {
         startup: 4, active: 3, endlag: 9,
-        hitbox: { x: 32, y: 12, w: 52, h: 16, damage: 6, knockback: 24, angle: 28 },
+        hitbox: hitboxFromPose('dtilt_hit', { damage: 6, knockback: 24, angle: 28, pad: 4 }),
         meterKind: 'TILT',
       },
 
       // Divergent Fist — charged straight + delayed 2nd hit after 8 frames.
+      // Smashable: holding ATTACK charges the initial punch up to 1.7x.
       fsmash: {
-        startup: 12, active: 4, endlag: 24, meterKind: 'SMASH',
+        startup: 12, active: 4, endlag: 24, meterKind: 'SMASH', smash: true,
         windows: [
-          // Hit 1
           { from: 12, to: 16,
-            hitbox: { x: 42, y: 50, w: 50, h: 30, damage: 10, knockback: 55, angle: 40 } },
+            hitbox: hitboxFromPose('fsmash_hit', { damage: 10, knockback: 55, angle: 40, pad: 4 }) },
           // Delayed cursed energy burst (hit 2): different angle, harder to DI
           { from: 24, to: 28,
-            hitbox: { x: 44, y: 46, w: 60, h: 36, damage: 8, knockback: 75, angle: 75 } },
+            hitbox: hitboxFromPose('fsmash_max', { damage: 8, knockback: 75, angle: 75, pad: 4 }) },
         ],
       },
       usmash: {
-        startup: 10, active: 5, endlag: 22,
-        hitbox: { x: 0, y: 90, w: 70, h: 50, damage: 14, knockback: 85, angle: 90 },
+        startup: 10, active: 5, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('usmash_hit', { damage: 14, knockback: 85, angle: 90, pad: 6 }),
         meterKind: 'SMASH',
       },
       dsmash: {
-        startup: 9, active: 5, endlag: 20,
-        hitbox: { x: 0, y: 8, w: 120, h: 26, damage: 12, knockback: 68, angle: 30 },
+        startup: 9, active: 5, endlag: 20, smash: true,
+        hitbox: hitboxFromPose('dsmash_hit', { damage: 12, knockback: 68, angle: 30, pad: 4 }),
         meterKind: 'SMASH',
       },
 
       // Black Flash — frame-perfect SPECIAL repress near impact (3-frame window).
       neutralspecial: {
         startup: 12, active: 4, endlag: 18, ceCost: 12, meterKind: 'SPECIAL',
-        hitbox: f => ({
-          x: 40, y: 50, w: 46, h: 30,
+        hitbox: f => hitboxFromPose('neutralspecial_hit', {
           damage: f._blackFlashPerfect ? 25 : 10,
           knockback: f._blackFlashPerfect ? 105 : 48,
           angle: 40,
+          pad: 6,
         }),
         onStart(f) {
           f._blackFlashPerfect = false;
@@ -158,13 +159,13 @@ export class YujiSukunaFighter extends Fighter {
       // Manji Kick — rushing roundhouse, good approach + combo extender.
       sidespecial: {
         startup: 6, active: 6, endlag: 16, ceCost: 8, meterKind: 'SPECIAL',
-        hitbox: { x: 44, y: 42, w: 58, h: 36, damage: 11, knockback: 55, angle: 38 },
+        hitbox: hitboxFromPose('sidespecial_hit', { damage: 11, knockback: 55, angle: 38, pad: 6 }),
         onStart(f) { f.vx = f.facing * 10; f.vy = Math.min(f.vy, -2); },
       },
       // Cursed Energy Leap — recovery with small hit on ascent.
       upspecial: {
         startup: 4, active: 8, endlag: 20, ceCost: 5, meterKind: 'SPECIAL',
-        hitbox: { x: 0, y: 86, w: 50, h: 50, damage: 7, knockback: 48, angle: 82 },
+        hitbox: hitboxFromPose('upspecial_hit', { damage: 7, knockback: 48, angle: 82, pad: 4 }),
         onStart(f) {
           f.vy = -17;
           const im = f.world && f.world.input;
@@ -185,36 +186,36 @@ export class YujiSukunaFighter extends Fighter {
         onStart(f) { self.swap(); },
       },
 
-      // Yuji aerials — fast and combo-friendly.
+      // Yuji aerials — fast, combo-friendly, low landing lag. Short-hop combos!
       nair: {
-        startup: 3, active: 14, endlag: 8,
-        hitbox: { x: 0, y: 50, w: 60, h: 52, damage: 7, knockback: 38, angle: 50 },
+        startup: 3, active: 14, endlag: 8, aerial: true, landingLag: 6, autocancel: 20,
+        hitbox: hitboxFromPose('nair', { damage: 7, knockback: 38, angle: 50, pad: 4 }),
         meterKind: 'AERIAL',
       },
       fair: {
-        startup: 6, active: 4, endlag: 12,
-        hitbox: { x: 38, y: 52, w: 46, h: 30, damage: 9, knockback: 48, angle: 44 },
+        startup: 6, active: 4, endlag: 12, aerial: true, landingLag: 10,
+        hitbox: hitboxFromPose('fair', { damage: 9, knockback: 48, angle: 44, pad: 4 }),
         meterKind: 'AERIAL',
       },
       bair: {
-        startup: 5, active: 4, endlag: 12,
-        hitbox: { x: -38, y: 52, w: 46, h: 28, damage: 11, knockback: 60, angle: 135 },
+        startup: 5, active: 4, endlag: 12, aerial: true, landingLag: 9,
+        hitbox: hitboxFromPose('bair', { damage: 11, knockback: 60, angle: 135, pad: 4 }),
         meterKind: 'AERIAL',
       },
       uair: {
-        startup: 4, active: 5, endlag: 10,
-        hitbox: { x: 0, y: 96, w: 52, h: 42, damage: 8, knockback: 46, angle: 88 },
+        startup: 4, active: 5, endlag: 10, aerial: true, landingLag: 7,
+        hitbox: hitboxFromPose('uair', { damage: 8, knockback: 46, angle: 88, pad: 4 }),
         meterKind: 'AERIAL',
       },
       dair: {
-        startup: 8, active: 4, endlag: 14,
-        hitbox: { x: 0, y: 0, w: 48, h: 32, damage: 10, knockback: 46, angle: 260 },
+        startup: 8, active: 4, endlag: 14, aerial: true, landingLag: 14,
+        hitbox: hitboxFromPose('dair', { damage: 10, knockback: 46, angle: 260, pad: 4 }),
         meterKind: 'AERIAL',
       },
 
       grab: {
-        startup: 5, active: 3, endlag: 14,
-        hitbox: { x: 36, y: 60, w: 38, h: 32, damage: 0, knockback: 0, angle: 0 },
+        startup: 5, active: 3, endlag: 14, grab: true,
+        hitbox: hitboxFromPose('grab', { damage: 0, knockback: 0, angle: 0, pad: 6 }),
         meterKind: 'THROW',
       },
     };
@@ -222,10 +223,12 @@ export class YujiSukunaFighter extends Fighter {
 
   _sukunaMoves() {
     return {
-      // Invisible blade 3-hit jab: each hit has disjointed reach.
+      // Invisible blade 3-hit jab: each hit has disjointed reach. Slightly
+      // padded hitbox so disjointed blade "reaches beyond" his body like the
+      // plan describes.
       jab: {
         startup: 4, active: 3, endlag: 9,
-        hitbox: { x: 42, y: 52, w: 58, h: 22, damage: 4, knockback: 18, angle: 32 },
+        hitbox: hitboxFromPose('jab_hit', { damage: 4, knockback: 18, angle: 32, pad: 10 }),
         meterKind: 'JAB',
       },
       // Dismantle: quick invisible slash projectile (~1/4 stage).
@@ -245,35 +248,35 @@ export class YujiSukunaFighter extends Fighter {
       },
       utilt: {
         startup: 5, active: 4, endlag: 12,
-        hitbox: { x: 0, y: 96, w: 78, h: 40, damage: 9, knockback: 58, angle: 88 },
+        hitbox: hitboxFromPose('utilt_hit', { damage: 9, knockback: 58, angle: 88, pad: 10 }),
         meterKind: 'TILT',
       },
       dtilt: {
         startup: 4, active: 4, endlag: 11,
-        hitbox: { x: 40, y: 8, w: 92, h: 16, damage: 7, knockback: 28, angle: 22 },
+        hitbox: hitboxFromPose('dtilt_hit', { damage: 7, knockback: 28, angle: 22, pad: 10 }),
         meterKind: 'TILT',
       },
 
-      // Cleave — adaptive Fsmash.
+      // Cleave — adaptive Fsmash (damage scales with target's percent).
       fsmash: {
-        startup: 14, active: 4, endlag: 24, meterKind: 'SMASH',
+        startup: 14, active: 4, endlag: 24, meterKind: 'SMASH', smash: true,
         hitbox: f => {
           const target = f.world && f.world.fighters.find(o => o !== f && !o.ko);
           const tp = target ? target.percent : 0;
           const dmg = 12 + Math.min(10, tp * 0.08);
-          return { x: 56, y: 50, w: 88, h: 40, damage: dmg, knockback: 88, angle: 40 };
+          return hitboxFromPose('fsmash_hit', { damage: dmg, knockback: 88, angle: 40, pad: 10 });
         },
       },
       // Four-arm upward slash — wide KO hitbox.
       usmash: {
-        startup: 10, active: 6, endlag: 22,
-        hitbox: { x: 0, y: 98, w: 104, h: 58, damage: 15, knockback: 90, angle: 90 },
+        startup: 10, active: 6, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('usmash_hit', { damage: 15, knockback: 90, angle: 90, pad: 12 }),
         meterKind: 'SMASH',
       },
       // Circular slash around Sukuna.
       dsmash: {
-        startup: 10, active: 6, endlag: 22,
-        hitbox: { x: 0, y: 12, w: 150, h: 32, damage: 14, knockback: 74, angle: 30 },
+        startup: 10, active: 6, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('dsmash_hit', { damage: 14, knockback: 74, angle: 30, pad: 10 }),
         meterKind: 'SMASH',
       },
 
@@ -309,7 +312,7 @@ export class YujiSukunaFighter extends Fighter {
       // Cursed Flame Jump — upward fire, hits on ascent.
       upspecial: {
         startup: 5, active: 10, endlag: 22, ceCost: 10, meterKind: 'SPECIAL',
-        hitbox: { x: 0, y: 90, w: 62, h: 70, damage: 9, knockback: 55, angle: 85 },
+        hitbox: hitboxFromPose('upspecial_hit', { damage: 9, knockback: 55, angle: 85, pad: 8 }),
         onStart(f) { f.vy = -16; f.jumpsLeft = 1; f.vx = f.facing * 2.5; },
       },
 
@@ -320,36 +323,36 @@ export class YujiSukunaFighter extends Fighter {
 
       // Sukuna aerials — slower but disjointed, bigger reach.
       nair: {
-        startup: 5, active: 14, endlag: 12,
-        hitbox: { x: 0, y: 50, w: 84, h: 62, damage: 10, knockback: 50, angle: 50 },
+        startup: 5, active: 14, endlag: 12, aerial: true, landingLag: 10, autocancel: 22,
+        hitbox: hitboxFromPose('nair', { damage: 10, knockback: 50, angle: 50, pad: 10 }),
         meterKind: 'AERIAL',
       },
       fair: {
-        startup: 7, active: 5, endlag: 14,
-        hitbox: { x: 54, y: 52, w: 74, h: 30, damage: 12, knockback: 62, angle: 44 },
+        startup: 7, active: 5, endlag: 14, aerial: true, landingLag: 14,
+        hitbox: hitboxFromPose('fair', { damage: 12, knockback: 62, angle: 44, pad: 10 }),
         meterKind: 'AERIAL',
       },
       bair: {
-        startup: 7, active: 4, endlag: 14,
-        hitbox: { x: -54, y: 52, w: 74, h: 28, damage: 14, knockback: 72, angle: 135 },
+        startup: 7, active: 4, endlag: 14, aerial: true, landingLag: 12,
+        hitbox: hitboxFromPose('bair', { damage: 14, knockback: 72, angle: 135, pad: 10 }),
         meterKind: 'AERIAL',
       },
       // Upward spear of invisible blades.
       uair: {
-        startup: 6, active: 5, endlag: 12,
-        hitbox: { x: 0, y: 104, w: 58, h: 56, damage: 11, knockback: 58, angle: 90 },
+        startup: 6, active: 5, endlag: 12, aerial: true, landingLag: 10,
+        hitbox: hitboxFromPose('uair', { damage: 11, knockback: 58, angle: 90, pad: 10 }),
         meterKind: 'AERIAL',
       },
       // Plunging slash (strong spike).
       dair: {
-        startup: 10, active: 6, endlag: 20,
-        hitbox: { x: 0, y: 0, w: 62, h: 42, damage: 14, knockback: 60, angle: 270 },
+        startup: 10, active: 6, endlag: 20, aerial: true, landingLag: 20,
+        hitbox: hitboxFromPose('dair', { damage: 14, knockback: 60, angle: 270, pad: 10 }),
         meterKind: 'AERIAL',
       },
 
       grab: {
-        startup: 6, active: 3, endlag: 16,
-        hitbox: { x: 40, y: 60, w: 42, h: 32, damage: 0, knockback: 0, angle: 0 },
+        startup: 6, active: 3, endlag: 16, grab: true,
+        hitbox: hitboxFromPose('grab', { damage: 0, knockback: 0, angle: 0, pad: 8 }),
         meterKind: 'THROW',
       },
     };

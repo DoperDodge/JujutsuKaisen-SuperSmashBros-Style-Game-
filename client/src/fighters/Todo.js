@@ -3,6 +3,7 @@
 import { Fighter } from './Fighter.js';
 import { FIGHTER_STATS } from '../../../shared/FighterData.js';
 import { UnlimitedBoogieWoogie } from '../systems/DomainExpansion.js';
+import { hitboxFromPose } from '../rendering/SpriteSheet.js';
 
 export class TodoFighter extends Fighter {
   constructor(opts) {
@@ -67,43 +68,113 @@ export class TodoFighter extends Fighter {
 
   _moves() {
     return {
-      jab:    { startup: 5, active: 3, endlag: 12, hitbox: { x: 36, y: 50, w: 50, h: 26, damage: 5, knockback: 35, angle: 30 }, meterKind: 'JAB' },
-      ftilt:  { startup: 7, active: 4, endlag: 14, hitbox: { x: 44, y: 50, w: 56, h: 26, damage: 11, knockback: 55, angle: 35 }, meterKind: 'TILT' },
-      utilt:  { startup: 6, active: 4, endlag: 14, hitbox: { x: 0, y: 100, w: 50, h: 40, damage: 10, knockback: 65, angle: 90 }, meterKind: 'TILT' },
-      dtilt:  { startup: 5, active: 4, endlag: 12, hitbox: { x: 36, y: 8, w: 60, h: 18, damage: 8, knockback: 25, angle: 20 }, meterKind: 'TILT' },
-      // Crushing Blow
-      fsmash: { startup: 24, active: 5, endlag: 30, hitbox: { x: 50, y: 50, w: 70, h: 40, damage: 22, knockback: 110, angle: 40 }, meterKind: 'SMASH' },
-      // Suplex Launch (command grab properties)
-      usmash: { startup: 14, active: 4, endlag: 24, hitbox: { x: 30, y: 80, w: 60, h: 60, damage: 16, knockback: 90, angle: 90, ignoresInfinity: true }, meterKind: 'SMASH' },
-      // Ground Pound
-      dsmash: { startup: 14, active: 5, endlag: 22, hitbox: { x: 0, y: 8, w: 150, h: 30, damage: 14, knockback: 75, angle: 30 }, meterKind: 'SMASH' },
+      // Jab — heavy hook, long reach.
+      jab: {
+        startup: 5, active: 3, endlag: 12,
+        hitbox: hitboxFromPose('jab_hit', { damage: 5, knockback: 35, angle: 30, pad: 6 }),
+        meterKind: 'JAB',
+      },
+      // Forward tilt — stepping elbow with buff.
+      ftilt: {
+        startup: 7, active: 4, endlag: 14,
+        hitbox: hitboxFromPose('ftilt_hit', { damage: 11, knockback: 55, angle: 35, pad: 6 }),
+        meterKind: 'TILT',
+      },
+      // Uppercut — juggle.
+      utilt: {
+        startup: 6, active: 4, endlag: 14,
+        hitbox: hitboxFromPose('utilt_hit', { damage: 10, knockback: 65, angle: 90, pad: 6 }),
+        meterKind: 'TILT',
+      },
+      // Low stomp.
+      dtilt: {
+        startup: 5, active: 4, endlag: 12,
+        hitbox: hitboxFromPose('dtilt_hit', { damage: 8, knockback: 25, angle: 20, pad: 6 }),
+        meterKind: 'TILT',
+      },
 
-      // Boogie Woogie
-      neutralspecial: { startup: 8, active: 1, endlag: 6, ceCost: 8, meterKind: 'SPECIAL',
+      // Crushing Blow — Playful Cloud-style 3-hit smash cascade.
+      fsmash: {
+        startup: 18, active: 22, endlag: 26, smash: true, meterKind: 'SMASH',
+        windows: [
+          { from: 18, to: 22,
+            hitbox: hitboxFromPose('fsmash_hit', { damage: 7, knockback: 28, angle: 80, pad: 6 }) },
+          { from: 26, to: 30,
+            hitbox: hitboxFromPose('fsmash_hit', { damage: 7, knockback: 28, angle: 90, pad: 6 }) },
+          { from: 34, to: 40,
+            hitbox: hitboxFromPose('fsmash_max', { damage: 14, knockback: 98, angle: 40, pad: 8 }) },
+        ],
+      },
+      // Suplex Launch (command-grab feel, ignores Infinity).
+      usmash: {
+        startup: 14, active: 4, endlag: 24, smash: true,
+        hitbox: hitboxFromPose('usmash_hit', {
+          damage: 16, knockback: 90, angle: 90, ignoresInfinity: true, pad: 8,
+        }),
+        meterKind: 'SMASH',
+      },
+      // Ground Pound.
+      dsmash: {
+        startup: 14, active: 5, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('dsmash_hit', { damage: 14, knockback: 75, angle: 30, pad: 10 }),
+        meterKind: 'SMASH',
+      },
+
+      // Boogie Woogie — clap & swap.
+      neutralspecial: {
+        startup: 8, active: 1, endlag: 6, ceCost: 8, meterKind: 'SPECIAL',
         onStart(f) { f.boogieSwap(f.world); },
       },
-      // Brother's Charge — dashing palm strike. Short startup, low end lag,
-      // and a forward burst of momentum so it actually combos into jab/ftilt.
-      sidespecial: { startup: 6, active: 4, endlag: 8, ceCost: 8, meterKind: 'SPECIAL',
+      // Brother's Charge — dashing palm strike.
+      sidespecial: {
+        startup: 6, active: 4, endlag: 8, ceCost: 8, meterKind: 'SPECIAL',
+        hitbox: hitboxFromPose('sidespecial_hit', { damage: 9, knockback: 45, angle: 50, pad: 6 }),
         onStart(f) { f.vx = f.facing * 9; },
-        hitbox: { x: 44, y: 50, w: 60, h: 32, damage: 9, knockback: 45, angle: 50 },
       },
-      // Boogie Woogie Recovery
-      upspecial: { startup: 8, active: 4, endlag: 18, ceCost: 10, meterKind: 'SPECIAL',
+      // Boogie Woogie Recovery — clap burst launch.
+      upspecial: {
+        startup: 8, active: 4, endlag: 18, ceCost: 10, meterKind: 'SPECIAL',
+        hitbox: hitboxFromPose('upspecial_hit', { damage: 6, knockback: 40, angle: 80, pad: 6 }),
         onStart(f) { f.vy = -14; f.vx = f.facing * 5; f.jumpsLeft = 1; },
-        hitbox: { x: 30, y: 70, w: 50, h: 50, damage: 6, knockback: 40, angle: 80 },
       },
-      // Feint Clap — counter stance
-      downspecial: { startup: 8, active: 20, endlag: 14, ceCost: 12, meterKind: 'SPECIAL',
+      // Feint Clap — counter stance. On-hit: riposte window.
+      downspecial: {
+        startup: 8, active: 20, endlag: 14, ceCost: 12, meterKind: 'SPECIAL',
+        hitbox: hitboxFromPose('downspecial_hit', { damage: 12, knockback: 75, angle: 45, pad: 8 }),
         onStart(f) { f.invulnFrames = Math.max(f.invulnFrames, 8); },
-        hitbox: { x: 36, y: 50, w: 56, h: 50, damage: 12, knockback: 75, angle: 45 },
       },
-      nair: { startup: 5, active: 16, endlag: 12, hitbox: { x: 0, y: 50, w: 90, h: 60, damage: 11, knockback: 55, angle: 50 }, meterKind: 'AERIAL' },
-      fair: { startup: 8, active: 4, endlag: 16, hitbox: { x: 44, y: 50, w: 50, h: 30, damage: 13, knockback: 65, angle: 40 }, meterKind: 'AERIAL' },
-      bair: { startup: 7, active: 4, endlag: 14, hitbox: { x: -44, y: 50, w: 50, h: 30, damage: 16, knockback: 80, angle: 135 }, meterKind: 'AERIAL' },
-      uair: { startup: 6, active: 5, endlag: 14, hitbox: { x: 0, y: 100, w: 50, h: 50, damage: 11, knockback: 60, angle: 90 }, meterKind: 'AERIAL' },
-      dair: { startup: 12, active: 6, endlag: 24, hitbox: { x: 0, y: 0, w: 50, h: 40, damage: 16, knockback: 70, angle: 270 }, meterKind: 'AERIAL' },
-      grab: { startup: 7, active: 4, endlag: 18, hitbox: { x: 44, y: 60, w: 50, h: 36, damage: 0, knockback: 0, angle: 0 }, meterKind: 'THROW' },
+
+      // Aerials — heavy, committed, big damage.
+      nair: {
+        startup: 5, active: 16, endlag: 12, aerial: true, landingLag: 10, autocancel: 22,
+        hitbox: hitboxFromPose('nair', { damage: 11, knockback: 55, angle: 50, pad: 8 }),
+        meterKind: 'AERIAL',
+      },
+      fair: {
+        startup: 8, active: 4, endlag: 16, aerial: true, landingLag: 14,
+        hitbox: hitboxFromPose('fair', { damage: 13, knockback: 65, angle: 40, pad: 8 }),
+        meterKind: 'AERIAL',
+      },
+      bair: {
+        startup: 7, active: 4, endlag: 14, aerial: true, landingLag: 12,
+        hitbox: hitboxFromPose('bair', { damage: 16, knockback: 80, angle: 135, pad: 8 }),
+        meterKind: 'AERIAL',
+      },
+      uair: {
+        startup: 6, active: 5, endlag: 14, aerial: true, landingLag: 11,
+        hitbox: hitboxFromPose('uair', { damage: 11, knockback: 60, angle: 90, pad: 8 }),
+        meterKind: 'AERIAL',
+      },
+      dair: {
+        startup: 12, active: 6, endlag: 24, aerial: true, landingLag: 22,
+        hitbox: hitboxFromPose('dair', { damage: 16, knockback: 70, angle: 270, pad: 8 }),
+        meterKind: 'AERIAL',
+      },
+      grab: {
+        startup: 7, active: 4, endlag: 18, grab: true,
+        hitbox: hitboxFromPose('grab', { damage: 0, knockback: 0, angle: 0, pad: 8 }),
+        meterKind: 'THROW',
+      },
     };
   }
 }

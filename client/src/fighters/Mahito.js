@@ -9,6 +9,7 @@ import { Fighter } from './Fighter.js';
 import { FIGHTER_STATS } from '../../../shared/FighterData.js';
 import { SelfEmbodiment } from '../systems/DomainExpansion.js';
 import { INPUT, isPressed } from '../../../shared/InputCodes.js';
+import { hitboxFromPose } from '../rendering/SpriteSheet.js';
 
 function applyStacks(target, n) {
   target.soulCorruption = Math.min(5, (target.soulCorruption || 0) + n);
@@ -38,51 +39,51 @@ export class MahitoFighter extends Fighter {
       // Morphing-limb jab: visually different frame-to-frame, stats consistent.
       jab: {
         startup: 4, active: 3, endlag: 9,
-        hitbox: { x: 32, y: 50, w: 46, h: 22, damage: 3, knockback: 16, angle: 35 },
+        hitbox: hitboxFromPose('jab_hit', { damage: 3, knockback: 16, angle: 35, pad: 4 }),
         meterKind: 'JAB',
       },
       // Blade Arm — long-reach forward tilt.
       ftilt: {
         startup: 6, active: 4, endlag: 13,
-        hitbox: { x: 52, y: 48, w: 74, h: 22, damage: 8, knockback: 42, angle: 35 },
+        hitbox: hitboxFromPose('ftilt_hit', { damage: 8, knockback: 42, angle: 35, pad: 6 }),
         meterKind: 'TILT',
       },
       // Spike Launch — anti-air.
       utilt: {
         startup: 5, active: 4, endlag: 11,
-        hitbox: { x: 0, y: 96, w: 36, h: 60, damage: 7, knockback: 46, angle: 88 },
+        hitbox: hitboxFromPose('utilt_hit', { damage: 7, knockback: 46, angle: 88, pad: 6 }),
         meterKind: 'TILT',
       },
       // Tendril Sweep — long low poke.
       dtilt: {
         startup: 5, active: 5, endlag: 14,
-        hitbox: { x: 52, y: 8, w: 108, h: 16, damage: 6, knockback: 26, angle: 22 },
+        hitbox: hitboxFromPose('dtilt_hit', { damage: 6, knockback: 26, angle: 22, pad: 6 }),
         meterKind: 'TILT',
       },
 
       // Body Slam Morph — body expands into a club.
       fsmash: {
-        startup: 16, active: 5, endlag: 26,
-        hitbox: { x: 46, y: 50, w: 82, h: 52, damage: 18, knockback: 94, angle: 40 },
+        startup: 16, active: 5, endlag: 26, smash: true,
+        hitbox: hitboxFromPose('fsmash_hit', { damage: 18, knockback: 94, angle: 40, pad: 8 }),
         meterKind: 'SMASH',
       },
       // Spike Crown — wide upward spikes.
       usmash: {
-        startup: 12, active: 6, endlag: 22,
-        hitbox: { x: 0, y: 100, w: 84, h: 64, damage: 14, knockback: 84, angle: 90 },
+        startup: 12, active: 6, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('usmash_hit', { damage: 14, knockback: 84, angle: 90, pad: 8 }),
         meterKind: 'SMASH',
       },
       // Ground Spike Net — catches rolls.
       dsmash: {
-        startup: 11, active: 5, endlag: 22,
-        hitbox: { x: 0, y: 8, w: 140, h: 32, damage: 13, knockback: 70, angle: 25 },
+        startup: 11, active: 5, endlag: 22, smash: true,
+        hitbox: hitboxFromPose('dsmash_hit', { damage: 13, knockback: 70, angle: 25, pad: 8 }),
         meterKind: 'SMASH',
       },
 
       // Soul Touch — short-range lunge, 1 stack.
       neutralspecial: {
         startup: 7, active: 4, endlag: 14, ceCost: 10, meterKind: 'SPECIAL',
-        hitbox: { x: 36, y: 50, w: 54, h: 32, damage: 6, knockback: 32, angle: 35 },
+        hitbox: hitboxFromPose('neutralspecial_hit', { damage: 6, knockback: 32, angle: 35, pad: 6 }),
         onStart(f) { f.vx = f.facing * 5; },
         onHit(f, target) { applyStacks(target, 1 * self._stackMul()); },
       },
@@ -112,7 +113,7 @@ export class MahitoFighter extends Fighter {
       // Wing Morph — recovery with wing hitbox.
       upspecial: {
         startup: 5, active: 10, endlag: 22, ceCost: 8, meterKind: 'SPECIAL',
-        hitbox: { x: 0, y: 80, w: 88, h: 56, damage: 7, knockback: 48, angle: 75 },
+        hitbox: hitboxFromPose('upspecial_hit', { damage: 7, knockback: 48, angle: 75, pad: 8 }),
         onStart(f) {
           const im = f.world && f.world.input;
           let hx = 0;
@@ -131,47 +132,46 @@ export class MahitoFighter extends Fighter {
       // Body Disfigure — command grab (ignores shield), 2 stacks.
       downspecial: {
         startup: 14, active: 4, endlag: 22, ceCost: 15, meterKind: 'SPECIAL',
-        hitbox: {
-          x: 36, y: 52, w: 44, h: 62,
-          damage: 10, knockback: 40, angle: 60, ignoresInfinity: true,
-        },
+        hitbox: hitboxFromPose('downspecial_hit', {
+          damage: 10, knockback: 40, angle: 60, ignoresInfinity: true, pad: 8,
+        }),
         onHit(f, target) { applyStacks(target, 2 * self._stackMul()); },
       },
 
       // Mahito aerials — morph-themed.
       nair: {
-        startup: 5, active: 12, endlag: 10,
-        hitbox: { x: 0, y: 50, w: 72, h: 60, damage: 8, knockback: 42, angle: 55 },
+        startup: 5, active: 12, endlag: 10, aerial: true, landingLag: 8, autocancel: 20,
+        hitbox: hitboxFromPose('nair', { damage: 8, knockback: 42, angle: 55, pad: 6 }),
         meterKind: 'AERIAL',
       },
       // Fair: arm becomes drill, long horizontal reach.
       fair: {
-        startup: 7, active: 4, endlag: 12,
-        hitbox: { x: 62, y: 52, w: 72, h: 22, damage: 10, knockback: 52, angle: 40 },
+        startup: 7, active: 4, endlag: 12, aerial: true, landingLag: 12,
+        hitbox: hitboxFromPose('fair', { damage: 10, knockback: 52, angle: 40, pad: 6 }),
         meterKind: 'AERIAL',
       },
       // Bair: tail whip.
       bair: {
-        startup: 7, active: 4, endlag: 12,
-        hitbox: { x: -52, y: 52, w: 62, h: 24, damage: 11, knockback: 58, angle: 135 },
+        startup: 7, active: 4, endlag: 12, aerial: true, landingLag: 11,
+        hitbox: hitboxFromPose('bair', { damage: 11, knockback: 58, angle: 135, pad: 6 }),
         meterKind: 'AERIAL',
       },
       // Uair: back spikes extend.
       uair: {
-        startup: 5, active: 5, endlag: 11,
-        hitbox: { x: 0, y: 104, w: 58, h: 52, damage: 8, knockback: 50, angle: 90 },
+        startup: 5, active: 5, endlag: 11, aerial: true, landingLag: 9,
+        hitbox: hitboxFromPose('uair', { damage: 8, knockback: 50, angle: 90, pad: 6 }),
         meterKind: 'AERIAL',
       },
       // Dair: legs become stone block. Strong spike, slow.
       dair: {
-        startup: 12, active: 6, endlag: 22,
-        hitbox: { x: 0, y: 0, w: 54, h: 44, damage: 13, knockback: 64, angle: 270 },
+        startup: 12, active: 6, endlag: 22, aerial: true, landingLag: 22,
+        hitbox: hitboxFromPose('dair', { damage: 13, knockback: 64, angle: 270, pad: 6 }),
         meterKind: 'AERIAL',
       },
 
       grab: {
-        startup: 6, active: 3, endlag: 16,
-        hitbox: { x: 36, y: 60, w: 40, h: 32, damage: 0, knockback: 0, angle: 0 },
+        startup: 6, active: 3, endlag: 16, grab: true,
+        hitbox: hitboxFromPose('grab', { damage: 0, knockback: 0, angle: 0, pad: 6 }),
         meterKind: 'THROW',
         onHit(f, target) { applyStacks(target, 1); },
       },
