@@ -1,5 +1,23 @@
 // Base Fighter class. State machine, movement, attack execution, hitbox spawning.
 // Per-character files extend this and provide a `moves` table + `domainClass`.
+//
+// Move schema (single-window or multi-window):
+//   {
+//     startup: N,  active: M, endlag: E,
+//     hitbox: { x, y, w, h, damage, knockback, angle, ignoresInfinity, meterKind },
+//     // OR multiple timed windows, e.g. for Playful Cloud 3-hit combos:
+//     windows: [ { from, to, hitbox } ],
+//     ceCost: 10, meterKind: 'SPECIAL',
+//     onStart(fighter) { ... },    // fires on attack start (pre-startup)
+//     onFrame(fighter, frame, world) { ... }, // fires each action-tick frame
+//     onHit(attacker, defender, world, hb) { ... }, // post-hit hook
+//   }
+//
+// When `windows` is supplied, `startup/active/endlag` are still used for the
+// default anim phase (startup -> wind, active -> hit) and total timing (total
+// = startup + active + endlag), but hitbox activation is governed by the
+// windows. This keeps multi-hit moves readable while staying compatible
+// with the existing animation flow.
 
 import { CONSTANTS } from '../../../shared/Constants.js';
 import { INPUT, isPressed, isDomainInput } from '../../../shared/InputCodes.js';
@@ -13,9 +31,9 @@ let nextId = 1;
 export class Fighter {
   constructor(opts) {
     this.id = nextId++;
-    this.character = opts.character;       // 'gojo' | 'yuji' | ...
+    this.character = opts.character;
     this.displayName = opts.displayName || opts.character;
-    this.playerIndex = opts.playerIndex;   // 0 or 1
+    this.playerIndex = opts.playerIndex;
     this.x = opts.x ?? 400;
     this.y = opts.y ?? 400;
     this.spawnX = this.x; this.spawnY = this.y;
@@ -40,6 +58,9 @@ export class Fighter {
     this.actionTimer = 0;
     this.currentMove = null;
     this.activeHitbox = null;
+    // Tracks which window is currently active (for windows-based moves) so
+    // every window applies a fresh per-target hit dedupe.
+    this._activeWindowIdx = -1;
     this.hitstun = 0;
     this.hitstop = 0;
     this.tumble = false;
@@ -55,28 +76,30 @@ export class Fighter {
     this.animFrame = 0;
     this.dropThrough = false;
     this.dropThroughTimer = 0;
-    this.passiveInfinity = false;       // Gojo
-    this.soulCorruption = 0;            // Mahito stack on opponent
+    this.passiveInfinity = false;
+    this.soulCorruption = 0;
     this.soulCorruptionTimer = 0;
-    this.boogieMode = false;            // Todo
-    this.domainEnhanced = false;        // Mahito
+    this.boogieMode = false;
+    this.domainEnhanced = false;
     this.domainStun = 0;
-    this.alreadyHit = new Set();        // hitbox-instance dedupe per swing
-    this.moves = {};                    // populated by subclass
+    this.alreadyHit = new Set();
+    this.moves = {};
     this.ko = false;
     this.koCooldown = 0;
-    this.combo = 0;                     // domain meter rage tracker
-    this.consecutiveHits = 0;           // Todo passive zone
+    this.combo = 0;
+    this.consecutiveHits = 0;
     this.consecutiveHitsTimer = 0;
     this.zoneBuff = 0;
     this.facingLocked = false;
     this.domainMeter = new DomainMeter();
-    this.domainClass = null;            // assigned by subclass
+    this.domainClass = null;
     this.world = null;
     this._prevInput = 0;
+    // Per-attack hitbox override — the last spawned world-space hitbox box so
+    // the renderer can draw the swing VFX on top of the real hurtbox.
+    this._lastWorldHitbox = null;
   }
 
-  // Subclasses must implement getMoves() returning a table keyed by move name.
   init(world) {
     this.world = world;
     if (!this.domainClass) this.domainClass = DOMAIN_BY_FIGHTER[this.character];
@@ -91,7 +114,6 @@ export class Fighter {
     }
     if (this.hitstop > 0) { this.hitstop--; return; }
 
-    // domain stun → frozen
     if (this.domainStun > 0) {
       this.domainStun--;
       this.vx *= 0.85;
@@ -100,7 +122,6 @@ export class Fighter {
       return;
     }
 
-    // status timers
     if (this.invulnFrames > 0) this.invulnFrames--;
     if (this.stunTimer > 0) this.stunTimer--;
     if (this.hitstun > 0) this.hitstun--;
@@ -120,15 +141,13 @@ export class Fighter {
     regenCE(this);
     this.domainMeter.tick();
 
-    // Domain Expansion input takes priority
     if (this.domainMeter.ready() && isDomainInput(input) && this.state !== 'domain_cast' && this.hitstun === 0) {
       this.activateDomain(world);
       return;
     }
 
-    // Action selection only if not in hitstun/attack
     if (this.hitstun > 0) {
-      this._handleHitstunMovement();
+      this._handleHitstunMovement(input);
       this._afterMove(world);
       return;
     }
@@ -144,7 +163,6 @@ export class Fighter {
       return;
     }
 
-    // movement & action input
     this._handleMovementInput(input);
     this._handleActionInput(input, world);
     this._afterMove(world);
@@ -154,7 +172,6 @@ export class Fighter {
     applyGravity(this);
     resolveStageCollision(this, world.stage);
     if (checkBlastZones(this)) this._ko();
-    // facing
     if (!this.facingLocked && Math.abs(this.vx) > 0.1 && this.state !== 'attack') {
       this.facing = this.vx > 0 ? 1 : -1;
     }
@@ -165,7 +182,6 @@ export class Fighter {
     const left = isPressed(input, INPUT.LEFT);
     const right = isPressed(input, INPUT.RIGHT);
     const down = isPressed(input, INPUT.DOWN);
-    const jump = isPressed(input, INPUT.JUMP);
     const shield = isPressed(input, INPUT.SHIELD);
 
     this.shielding = shield && this.grounded;
@@ -224,8 +240,6 @@ export class Fighter {
     const dirH = (right ? 1 : 0) - (left ? 1 : 0);
 
     if (pressedAttack) {
-      // Right-stick tilts and stick-flick smashes use the input manager.
-      // tilt = held right stick direction, smash = recent left-stick flick.
       const im = world && world.input;
       const tilt = im ? im.tiltDir(this.playerIndex) : { x: 0, y: 0 };
       const smash = im ? im.smashFlick(this.playerIndex) : { x: 0, y: 0 };
@@ -237,12 +251,10 @@ export class Fighter {
         else if (dirH !== 0) moveName = (dirH === this.facing ? 'fair' : 'bair');
         else moveName = 'nair';
       } else if (smash.x !== 0 || smash.y !== 0) {
-        // Smash attack from stick flick (or shift-modified keyboard).
         if (smash.y < 0) moveName = 'usmash';
         else if (smash.y > 0) moveName = 'dsmash';
         else { moveName = 'fsmash'; this.facing = smash.x; }
       } else if (tilt.x !== 0 || tilt.y !== 0) {
-        // Right-stick tilt: explicit tilt regardless of movement direction.
         if (tilt.y < 0) moveName = 'utilt';
         else if (tilt.y > 0) moveName = 'dtilt';
         else { moveName = 'ftilt'; this.facing = tilt.x; }
@@ -278,9 +290,50 @@ export class Fighter {
     this.currentMove = { ...move, name };
     this.actionTimer = 0;
     this.alreadyHit.clear();
+    this._activeWindowIdx = -1;
     this.activeHitbox = null;
+    this._lastWorldHitbox = null;
     this.facingLocked = true;
     if (move.onStart) move.onStart(this);
+  }
+
+  _buildHitboxWorld(hbDef) {
+    return {
+      x: this.x + (hbDef.x ?? 0) * this.facing - hbDef.w * 0.5,
+      y: this.y - this.height + (hbDef.y ?? 0),
+      w: hbDef.w, h: hbDef.h,
+      damage: hbDef.damage, knockback: hbDef.knockback, angle: hbDef.angle,
+      ignoresInfinity: hbDef.ignoresInfinity,
+    };
+  }
+
+  _processHitbox(world, hb, move, windowKey) {
+    this.activeHitbox = hb;
+    this._lastWorldHitbox = hb;
+    for (const other of world.fighters) {
+      if (other === this || other.ko) continue;
+      const dedupeKey = windowKey != null ? `${other.id}:${windowKey}` : `${other.id}`;
+      if (this.alreadyHit.has(dedupeKey)) continue;
+      const ob = { x: other.x - other.width / 2, y: other.y - other.height, w: other.width, h: other.height };
+      if (aabbOverlap(hb, ob)) {
+        if (move.onHit) move.onHit(this, other, world, hb);
+        const did = applyHit(this, other, hb);
+        if (did && !other.shielding) {
+          this.alreadyHit.add(dedupeKey);
+          this.domainMeter.addOnHit(move.meterKind || 'JAB');
+          other.domainMeter.addOnDamageTaken(hb.damage);
+          this.consecutiveHits++;
+          this.consecutiveHitsTimer = 120;
+          if (this.consecutiveHits >= 3 && this.character === 'todo') {
+            this.zoneBuff = 180;
+          }
+          world.particles.hitspark(hb.x + hb.w * 0.5, hb.y + hb.h * 0.5);
+          world.camera.shake(hb.damage >= 12 ? 10 : 6, hb.damage >= 12 ? 8 : 5);
+        } else if (did && other.shielding) {
+          this.alreadyHit.add(dedupeKey);
+        }
+      }
+    }
   }
 
   _tickAttack(world) {
@@ -288,57 +341,70 @@ export class Fighter {
     if (!m) { this.state = 'idle'; this.facingLocked = false; return; }
     this.actionTimer++;
 
-    // friction during ground attacks
-    if (this.grounded) this.vx *= 0.75;
-    else this.vx *= 0.98;
+    if (this.grounded) this.vx *= 0.78;
+    else this.vx *= 0.985;
 
-    // Hitbox window
-    if (this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active) {
+    if (m.onFrame) m.onFrame(this, this.actionTimer, world);
+
+    // Multi-window hitbox path: windows: [{ from, to, hitbox, meterKind, onHit }]
+    if (m.windows && m.windows.length) {
+      this.activeHitbox = null;
+      for (let i = 0; i < m.windows.length; i++) {
+        const w = m.windows[i];
+        if (this.actionTimer >= w.from && this.actionTimer < w.to) {
+          const hbDef = typeof w.hitbox === 'function' ? w.hitbox(this) : w.hitbox;
+          if (!hbDef) continue;
+          // Each window gets its own dedupe key so every hit in a combo lands.
+          const windowKey = i;
+          const hb = this._buildHitboxWorld(hbDef);
+          // allow per-window onHit override
+          const syntheticMove = {
+            meterKind: w.meterKind || m.meterKind,
+            onHit: w.onHit || m.onHit,
+          };
+          this._processHitbox(world, hb, syntheticMove, windowKey);
+          this._activeWindowIdx = i;
+          break;
+        }
+      }
+    } else if (this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active) {
       const hbDef = typeof m.hitbox === 'function' ? m.hitbox(this) : m.hitbox;
       if (hbDef) {
-        const hb = {
-          x: this.x + (hbDef.x ?? 0) * this.facing - hbDef.w * 0.5,
-          y: this.y - this.height + (hbDef.y ?? 0),
-          w: hbDef.w, h: hbDef.h,
-          damage: hbDef.damage, knockback: hbDef.knockback, angle: hbDef.angle,
-          ignoresInfinity: hbDef.ignoresInfinity,
-        };
-        this.activeHitbox = hb;
-        for (const other of world.fighters) {
-          if (other === this || other.ko) continue;
-          if (this.alreadyHit.has(other.id)) continue;
-          const ob = { x: other.x - other.width / 2, y: other.y - other.height, w: other.width, h: other.height };
-          if (aabbOverlap(hb, ob)) {
-            if (m.onHit) m.onHit(this, other, world, hb);
-            const did = applyHit(this, other, hb);
-            if (did && !other.shielding) {
-              this.alreadyHit.add(other.id);
-              this.domainMeter.addOnHit(m.meterKind || 'JAB');
-              other.domainMeter.addOnDamageTaken(hb.damage);
-              this.consecutiveHits++;
-              this.consecutiveHitsTimer = 120;
-              if (this.consecutiveHits >= 3 && this.character === 'todo') {
-                this.zoneBuff = 180;
-              }
-              world.particles.hitspark(hb.x + hb.w * 0.5, hb.y + hb.h * 0.5);
-              world.camera.shake(6, 6);
-            }
-          }
-        }
+        const hb = this._buildHitboxWorld(hbDef);
+        this._processHitbox(world, hb, m, null);
       }
     } else {
       this.activeHitbox = null;
     }
 
-    if (this.actionTimer >= m.startup + m.active + m.endlag) {
+    if (m.windows) {
+      const last = m.windows[m.windows.length - 1];
+      if (this.actionTimer >= last.to + (m.endlag || 8)) {
+        this.state = 'idle';
+        this.currentMove = null;
+        this.facingLocked = false;
+      }
+    } else if (this.actionTimer >= m.startup + m.active + m.endlag) {
       this.state = 'idle';
       this.currentMove = null;
       this.facingLocked = false;
     }
   }
 
-  _handleHitstunMovement() {
+  // Hitstun: light DI influence via stick direction. Keeps the fighter
+  // floaty-ish instead of dead-weight, matching SSB-Ultimate behavior.
+  _handleHitstunMovement(input) {
     this.vx *= 0.96;
+    if (!input) return;
+    const left  = isPressed(input, INPUT.LEFT);
+    const right = isPressed(input, INPUT.RIGHT);
+    const up    = isPressed(input, INPUT.UP);
+    const down  = isPressed(input, INPUT.DOWN);
+    // Small drift during hitstun
+    if (left)  this.vx -= 0.06;
+    if (right) this.vx += 0.06;
+    if (up)    this.vy -= 0.03;
+    if (down)  this.vy += 0.05;
   }
 
   _ko() {
@@ -346,6 +412,7 @@ export class Fighter {
     this.koCooldown = 90;
     this.stocks--;
     this.world && this.world.onKO && this.world.onKO(this);
+    if (this.world && this.world.camera) this.world.camera.shake(14, 16);
   }
 
   respawn() {
@@ -374,15 +441,14 @@ export class Fighter {
       const m = this.currentMove;
       if (!m) this.anim = 'idle';
       else {
-        const inWind = this.actionTimer < m.startup;
-        const inActive = this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active;
-        // Pick phased pose for moves that have wind/hit frames; fall back
-        // to a single-frame pose for aerials/grab.
+        const inWind = this.actionTimer < (m.startup || 0);
+        const inActive = m.windows
+          ? m.windows.some(w => this.actionTimer >= w.from && this.actionTimer < w.to)
+          : (this.actionTimer >= m.startup && this.actionTimer < m.startup + m.active);
         const phased = ['jab','ftilt','utilt','dtilt','fsmash','usmash','dsmash',
                         'neutralspecial','sidespecial','upspecial','downspecial'];
         if (phased.includes(m.name)) {
           if (m.name === 'jab') {
-            // 3-hit jab visual: rotate frames so swings look animated.
             if (inWind) this.anim = 'jab_wind';
             else if (inActive) this.anim = (this.actionTimer % 4 < 2) ? 'jab_hit' : 'jab_hit2';
             else this.anim = 'jab_hit';
