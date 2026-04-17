@@ -21,6 +21,7 @@ import { Shinjuku } from './stages/ShibuyaStation.js';
 import { ROSTER, FIGHTER_STATS } from '../../shared/FighterData.js';
 import { INPUT } from '../../shared/InputCodes.js';
 import { NetClient } from './net/NetClient.js';
+import { ProjectileSystem } from './engine/ProjectileSystem.js';
 
 const canvas = document.getElementById('game');
 const renderer = new Renderer(canvas);
@@ -168,6 +169,7 @@ function createWorld(stageIndex) {
   }
   const w = {
     stage, fighters, particles, camera, input,
+    projectiles: new ProjectileSystem(),
     tick: 0,
     timer: 60 * 60 * 7,
     activeDomain: null,
@@ -224,6 +226,7 @@ function updateMatch() {
     if (world.domainCinematic.tick > 60) world.domainCinematic = null;
   }
 
+  world.projectiles.update(world);
   world.stage.update(world);
   particles.update();
   camera.follow(world.fighters.filter(f => !f.ko));
@@ -253,6 +256,7 @@ function renderMatch() {
   renderer.drawStage(world.stage);
   world.stage.render(renderer.ctx, world);
   if (world.activeDomain) world.activeDomain.render(renderer.ctx, world);
+  world.projectiles.render(renderer.ctx);
 
   for (const f of world.fighters) {
     if (f.shielding) {
