@@ -827,6 +827,223 @@ function drawTodo(ctx, pose) {
   px(ctx, lhx + 4, lhy + 1, 1, 1, '#ffffff');
 }
 
+// =========================================================
+// Signature attack accessories — per JJK_SMASH_GAME_PLAN.md section 4.
+// =========================================================
+// Each character morphs / equips a signature implement per attack so every
+// move reads uniquely (Mahito's limbs become blades/clubs/spikes, Sukuna's
+// disjointed blades + four-arm slashes, Todo's Playful Cloud staff + clap,
+// Gojo's Blue/Red orbs + open palms, Yuji's cursed fists + Black Flash).
+// Drawn into the BODY layer (right after the base character) so they pick up
+// the silhouette outline. Pre-scale sprite space; forward = +x. Front-hand is
+// around x = (big?55:53) + armB[0], top at y = 50 + body + armB[1] + 18.
+
+// Horizontal tapering blade from (x,y) toward `dir` (±1), base height `h`,
+// length `len`; outer ~third uses `tip` (a cursed-energy color).
+function bladeH(ctx, x, y, len, h, body, tip, dir = 1) {
+  for (let i = 0; i < len; i++) {
+    const hh = Math.max(1, Math.round(h * (1 - i / len)));
+    px(ctx, dir > 0 ? x + i : x - i, y - (hh >> 1), 1, hh, i > len * 0.65 ? tip : body);
+  }
+}
+// Vertical tapering spike from (x,y), base width `w`, length `len`; dir -1 = up.
+function bladeV(ctx, x, y, len, w, body, tip, dir = -1) {
+  for (let i = 0; i < len; i++) {
+    const ww = Math.max(1, Math.round(w * (1 - i / len)));
+    px(ctx, x - (ww >> 1), dir < 0 ? y - i : y + i, ww, 1, i > len * 0.65 ? tip : body);
+  }
+}
+function orbAt(ctx, cx, cy, r, core, mid, edge) {
+  ctx.fillStyle = edge; ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = mid;  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffffff'; px(ctx, (cx - r * 0.4) | 0, (cy - r * 0.4) | 0, 2, 2);
+}
+
+// Mahito — Idle Transfiguration: every attack reshapes his body. (Plan 4.3)
+function sigMahito(ctx, name, pose) {
+  const baseY = 50 + pose.body;
+  const hx = 53 + pose.armB[0];
+  const armTop = baseY + pose.armB[1];
+  const handY = armTop + 18;
+  const F = '#c8b8c2', H = '#e6d8e2', G = '#9aff7a', S = '#1a1820', STONE = '#6a6a74', STONEHI = '#8c8c96';
+  if (name === 'ftilt_hit' || name === 'ftilt_wind' || name === 'fair') {
+    // Blade Arm — forearm stretches into a long blade.
+    const len = name === 'ftilt_wind' ? 14 : 26;
+    px(ctx, hx, handY - 2, 7, 9, F); px(ctx, hx, handY - 2, 7, 3, H);
+    bladeH(ctx, hx + 6, handY + 2, len, 11, F, G);
+    bladeH(ctx, hx + 7, handY + 2, len - 3, 4, H, G);
+    px(ctx, hx + 2, handY + 1, 1, 6, S);
+  } else if (name === 'fsmash_hit' || name === 'fsmash_max' || name === 'fsmash_wind') {
+    // Body Slam Morph — arm balloons into a massive club.
+    const reach = name === 'fsmash_wind' ? 2 : 13;
+    px(ctx, hx - 2, baseY + 2, 10, 20, F); px(ctx, hx - 2, baseY + 2, 10, 4, H);
+    px(ctx, hx + reach, baseY - 3, 16, 31, F); px(ctx, hx + reach, baseY - 3, 16, 5, H);
+    for (let i = 0; i < 3; i++) px(ctx, hx + reach + 3 + i * 5, baseY + 2, 1, 22, S);
+    bladeH(ctx, hx + reach + 16, baseY + 4, 7, 7, F, G);
+    bladeH(ctx, hx + reach + 16, baseY + 18, 7, 7, F, G);
+  } else if (name === 'utilt_hit' || name === 'utilt_wind') {
+    // Spike Launch — arm becomes an upward spike.
+    bladeV(ctx, hx + 2, armTop + 4, name === 'utilt_wind' ? 12 : 24, 11, F, G);
+  } else if (name === 'dtilt_hit' || name === 'dtilt_wind') {
+    // Tendril Sweep — arm extends as a low tendril.
+    const len = name === 'dtilt_wind' ? 16 : 30;
+    px(ctx, 48, 82, 7, 9, F);
+    bladeH(ctx, 55, 86, len, 7, F, G);
+  } else if (name === 'usmash_hit' || name === 'usmash_wind') {
+    // Spike Crown — spikes erupt upward from his back.
+    const n = name === 'usmash_wind' ? 3 : 5;
+    for (let i = 0; i < n; i++) bladeV(ctx, 26 + i * 7, 34 + pose.body, 22 - Math.abs(i - (n - 1) / 2) * 4, 7, F, G);
+  } else if (name === 'dsmash_hit' || name === 'dsmash_wind') {
+    // Ground Spike Net — spikes along the ground on both sides.
+    for (let i = 0; i < 5; i++) {
+      bladeV(ctx, 16 + i * 4, 98, 9, 5, F, G);
+      bladeV(ctx, 48 + i * 4, 98, 9, 5, F, G);
+    }
+  } else if (name === 'uair') {
+    for (let i = 0; i < 4; i++) bladeV(ctx, 28 + i * 6, 24 + pose.body, 18, 6, F, G);
+  } else if (name === 'dair') {
+    // Stone-block legs — heavy spike.
+    px(ctx, 30, 90, 22, 18, STONE); px(ctx, 30, 90, 22, 4, STONEHI);
+    for (let i = 0; i < 3; i++) px(ctx, 33 + i * 7, 94, 2, 12, '#46464e');
+  } else if (name === 'bair') {
+    // Tail whip backward.
+    px(ctx, 24, baseY + 14, 8, 7, F);
+    bladeH(ctx, 24, baseY + 17, 24, 8, F, G, -1);
+  } else if (name === 'nair') {
+    // Spiked ball — short spikes ringing the body.
+    for (let a = 0; a < 8; a++) {
+      const ang = (a / 8) * Math.PI * 2;
+      px(ctx, (40 + Math.cos(ang) * 14) | 0, (baseY + 14 + Math.sin(ang) * 14) | 0, 3, 3, a % 2 ? G : F);
+    }
+  } else if (name === 'upspecial_hit' || name === 'upspecial_wind') {
+    // Wing Morph — back sprouts wings.
+    for (let i = 0; i < 5; i++) { px(ctx, 26 - i * 2, armTop + i * 4, 8 + i * 2, 3, F); px(ctx, 26 - i * 2, armTop + i * 4, 3, 3, H); }
+    for (let i = 0; i < 5; i++) { px(ctx, 46 + i * 2, armTop + i * 4, 8 + i * 2, 3, F); px(ctx, 54 + i * 2, armTop + i * 4, 3, 3, H); }
+  } else if (name === 'neutralspecial_hit' || name === 'neutralspecial_wind' || name === 'downspecial_hit' || name === 'downspecial_wind') {
+    // Soul Touch / Body Disfigure — both hands splay with cursed glow.
+    px(ctx, hx, handY - 2, 8, 10, F); px(ctx, hx, handY - 2, 8, 3, G);
+    for (let i = 0; i < 3; i++) bladeH(ctx, hx + 8, handY - 1 + i * 4, 6, 3, F, G);
+  }
+}
+
+// Sukuna — disjointed invisible blades + the four-arm idle. (Plan 4.2)
+function sigSukuna(ctx, name, pose) {
+  const baseY = 50 + pose.body;
+  const hx = 53 + pose.armB[0];
+  const handY = baseY + pose.armB[1] + 18;
+  const R = '#ff3050', RH = '#ff96a6';
+  if (name === 'usmash_hit' || name === 'usmash_wind') {
+    // Four arms slash upward simultaneously.
+    const n = name === 'usmash_wind' ? 3 : 4;
+    for (let i = 0; i < n; i++) bladeV(ctx, 22 + i * 11, 36 + pose.body, 26 - Math.abs(i - (n - 1) / 2) * 5, 5, R, RH);
+  } else if (name === 'fsmash_hit' || name === 'fsmash_max' || name === 'fsmash_wind') {
+    // Cleave — one heavy descending blade reaching past his body.
+    const len = name === 'fsmash_wind' ? 12 : 30;
+    bladeH(ctx, hx, handY - 6, len, 20, R, RH);
+    bladeH(ctx, hx + 2, handY - 4, len - 4, 8, RH, '#ffffff');
+  } else if (name === 'uair') {
+    for (let i = 0; i < 3; i++) bladeV(ctx, 30 + i * 8, 24 + pose.body, 22, 4, R, RH);
+  } else if (name === 'dair') {
+    bladeV(ctx, 40, baseY + 26, 22, 8, R, RH, 1);
+  } else if (name === 'nair') {
+    for (let a = 0; a < 6; a++) {
+      const ang = (a / 6) * Math.PI * 2;
+      bladeH(ctx, (40 + Math.cos(ang) * 8) | 0, (baseY + 14 + Math.sin(ang) * 8) | 0, 12, 4, R, RH, Math.cos(ang) >= 0 ? 1 : -1);
+    }
+  } else if (name === 'jab_hit' || name === 'jab_hit2' || name === 'ftilt_hit' || name === 'fair' || name === 'bair') {
+    // Disjointed slash extends well past the hand.
+    const dir = name === 'bair' ? -1 : 1;
+    const x0 = dir > 0 ? hx + 4 : 28;
+    bladeH(ctx, x0, handY, 22, 10, R, RH, dir);
+  } else if (name === 'upspecial_hit' || name === 'upspecial_wind') {
+    // Cursed Flame Jump — flame licks up around him.
+    for (let i = 0; i < 6; i++) bladeV(ctx, 28 + i * 5, baseY + 24, 10 + (i % 3) * 6, 5, '#ff7a30', '#ffd24a');
+  }
+}
+
+// Todo — Playful Cloud cursed tool, Boogie-Woogie clap, heavy fists. (Plan 4.4)
+function sigTodo(ctx, name, pose) {
+  const baseY = 50 + pose.body;
+  const hx = 55 + pose.armB[0];
+  const handY = baseY + pose.armB[1] + 18;
+  if (name === 'sidespecial_hit' || name === 'sidespecial_wind') {
+    // Playful Cloud — three-section iron staff.
+    const y = baseY + 6, M = '#b8bcc8', MH = '#e4e8f0', D = '#5a5e68';
+    const segs = name === 'sidespecial_wind' ? 2 : 3;
+    for (let s = 0; s < segs; s++) {
+      const sx = hx - 4 + s * 13;
+      px(ctx, sx, y, 11, 6, M); px(ctx, sx, y, 11, 2, MH); px(ctx, sx, y + 5, 11, 1, D);
+      if (s < segs - 1) { px(ctx, sx + 11, y + 2, 2, 1, D); px(ctx, sx + 11, y + 3, 2, 1, D); }
+    }
+  } else if (name === 'neutralspecial_hit' || name === 'neutralspecial_wind' ||
+             name === 'downspecial_hit' || name === 'downspecial_wind') {
+    // Boogie Woogie / Feint Clap — both hands meet center with a flash.
+    const cx = 40, cy = baseY + 16;
+    px(ctx, cx - 9, cy, 9, 9, '#d8a878'); px(ctx, cx, cy, 9, 9, '#d8a878');
+    px(ctx, cx - 9, cy, 18, 3, '#e8c098');
+    px(ctx, cx - 2, cy - 6, 4, 21, '#ffffff'); px(ctx, cx - 6, cy + 2, 12, 4, '#fff7c8');
+  } else if (name === 'fsmash_hit' || name === 'fsmash_max' || name === 'fsmash_wind') {
+    // Crushing Blow — oversized haymaker fist.
+    px(ctx, hx - 3, handY - 5, 14, 16, '#d8a878'); px(ctx, hx - 3, handY - 5, 14, 4, '#e8c098');
+    px(ctx, hx - 3, handY - 5, 3, 16, '#a87850');
+  } else if (name === 'usmash_hit' || name === 'usmash_wind') {
+    // Suplex Launch — both arms reach up to grab.
+    px(ctx, 22, baseY - 4, 6, 16, '#d8a878'); px(ctx, 52, baseY - 4, 6, 16, '#d8a878');
+    px(ctx, 22, baseY - 4, 6, 3, '#e8c098'); px(ctx, 52, baseY - 4, 6, 3, '#e8c098');
+  }
+}
+
+// Gojo — open-palm strikes + Limitless Blue / Reversal Red. (Plan 4.1)
+function sigGojo(ctx, name, pose) {
+  const baseY = 50 + pose.body;
+  const hx = 53 + pose.armB[0];
+  const handY = baseY + pose.armB[1] + 18;
+  if (name === 'neutralspecial_hit' || name === 'neutralspecial_wind' ||
+      name === 'upspecial_hit' || name === 'upspecial_wind' ||
+      name === 'downspecial_hit' || name === 'downspecial_wind') {
+    // Cursed Technique Lapse: Blue — attraction orb cradled in the palm.
+    orbAt(ctx, hx + 6, handY + 1, 7, '#e8f6ff', '#5fd7ff', '#1850b0');
+  } else if (name === 'sidespecial_hit' || name === 'sidespecial_wind') {
+    // Cursed Technique Reversal: Red — repulsion orb (distinct red, not Blue).
+    orbAt(ctx, hx + 7, handY + 1, 7, '#ffe0e0', '#ff4050', '#7a0010');
+  } else if (/^(jab|ftilt|utilt|dtilt|fsmash|usmash|dsmash)_/.test(name) || name === 'fair' || name === 'bair') {
+    // Open-palm strike plate — Gojo fights with flat palms, not fists.
+    px(ctx, hx, handY - 2, 6, 10, '#f5d8b6');
+    px(ctx, hx + 5, handY - 1, 1, 8, '#c9a577');
+    px(ctx, hx, handY - 2, 6, 2, '#ffe8cc');
+  }
+}
+
+// Yuji — bare-knuckle brawler, cursed fists, Black Flash, Divergent Fist. (Plan 4.2)
+function sigYuji(ctx, name, pose) {
+  const baseY = 50 + pose.body;
+  const hx = 53 + pose.armB[0];
+  const handY = baseY + pose.armB[1] + 18;
+  if (name === 'neutralspecial_hit' || name === 'neutralspecial_wind') {
+    // Black Flash — fist wreathed in black/purple cursed sparks.
+    px(ctx, hx - 1, handY - 3, 9, 11, '#0a0014'); px(ctx, hx - 1, handY - 3, 9, 3, '#5a0a80');
+    for (let i = 0; i < 4; i++) px(ctx, hx - 3 + (i * 5 % 12), handY - 5 + (i * 7 % 16), 2, 2, '#b050ff');
+  } else if (name === 'fsmash_hit' || name === 'fsmash_max' || name === 'fsmash_wind') {
+    // Divergent Fist — bright cursed-energy straight.
+    px(ctx, hx - 1, handY - 3, 9, 11, '#ffb84a'); px(ctx, hx - 1, handY - 3, 9, 3, '#fff3c8');
+    px(ctx, hx + 8, handY, 4, 4, '#fff3c8');
+  } else if (/^(jab|ftilt|utilt|dtilt|usmash|dsmash)_/.test(name) || name === 'fair' || name === 'bair' || name === 'nair' || name === 'uair' || name === 'sidespecial_hit' || name === 'sidespecial_wind') {
+    // Cursed-energy knuckle glow on his strikes.
+    px(ctx, hx, handY - 2, 7, 9, '#f5cfa3');
+    px(ctx, hx + 1, handY - 1, 5, 3, '#ffd27a');
+    px(ctx, hx + 6, handY, 2, 5, '#ffb84a');
+  }
+}
+
+const SIGNATURE = {
+  gojo: sigGojo,
+  yuji: sigYuji,
+  sukuna: sigSukuna,
+  mahito: sigMahito,
+  todo: sigTodo,
+};
+
 const DRAWERS = {
   gojo: drawGojo,
   yuji: drawYuji,
@@ -846,10 +1063,22 @@ const CE_COLORS = {
   todo:   { core: '#fff8c8', mid: '#ffe070', edge: '#806020' },
 };
 
-function drawPoseFX(ctx, pose, character) {
+// Per-character, per-move FX recolor where a move's energy differs from the
+// character's default cursed-energy hue (plan-accurate signature techniques).
+function fxColorFor(character, poseName) {
+  if (character === 'gojo' && poseName.startsWith('sidespecial'))
+    return { core: '#ffe0e0', mid: '#ff4050', edge: '#7a0010' };   // Reversal: Red
+  if (character === 'yuji' && poseName.startsWith('neutralspecial'))
+    return { core: '#e8c0ff', mid: '#9f00ff', edge: '#1a0028' };   // Black Flash
+  if (character === 'sukuna' && poseName.startsWith('upspecial'))
+    return { core: '#ffe08a', mid: '#ff7a30', edge: '#7a1800' };   // Cursed Flame
+  return CE_COLORS[character];
+}
+
+function drawPoseFX(ctx, pose, character, colorOverride) {
   const s = pose.swing;
   if (!s) return;
-  const c = CE_COLORS[character] || { core: '#ffffff', mid: '#cccccc', edge: '#666666' };
+  const c = colorOverride || CE_COLORS[character] || { core: '#ffffff', mid: '#cccccc', edge: '#666666' };
   const fx = pose.fx || 'slash';
   ctx.save();
   if (fx === 'slash') {
@@ -1141,6 +1370,9 @@ export class SpriteSheet {
         bctx.imageSmoothingEnabled = false;
         bctx.scale(SCALE, SCALE);
         DRAWERS[key](bctx, POSES[poseName]);
+        // Signature per-attack morphs / weapons (blades, club, staff, orbs,
+        // spikes, wings…) drawn into the body layer so they get the outline.
+        if (SIGNATURE[key]) SIGNATURE[key](bctx, poseName, POSES[poseName]);
 
         // Build a black silhouette of the body layer (source-in preserves
         // alpha but forces every drawn pixel to black).
@@ -1167,7 +1399,7 @@ export class SpriteSheet {
         // Draw FX on top so energy effects sit above the body+outline.
         octx.save();
         octx.scale(SCALE, SCALE);
-        drawPoseFX(octx, POSES[poseName], key);
+        drawPoseFX(octx, POSES[poseName], key, fxColorFor(key, poseName));
         octx.restore();
 
         frames[poseName] = out;
