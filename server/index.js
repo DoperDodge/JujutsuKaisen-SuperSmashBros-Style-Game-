@@ -87,7 +87,11 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'state_sync': {
-        // Reserved for periodic checksum validation (anti-cheat)
+        // Relay authoritative state snapshot from slot-0 to slot-1.
+        if (!ws.room) return;
+        const room = rooms.get(ws.room);
+        if (!room) return;
+        room.broadcastExcept(ws, { ...msg, slot: ws.slot });
         break;
       }
       case 'queue': {

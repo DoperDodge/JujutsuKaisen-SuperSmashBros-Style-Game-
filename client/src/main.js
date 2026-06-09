@@ -77,6 +77,11 @@ const FIGHTER_CLASSES = {
 const STAGES = [JujutsuHigh, Shibuya, Shinjuku];
 const STAGE_NAMES = ['Tokyo Jujutsu High', 'Shibuya Underground Station', 'Shinjuku Showdown'];
 
+// ===== Online sync constants =====
+const INPUT_DELAY = 3;        // frames of fixed delay for lockstep (covers ~50 ms RTT)
+const MAX_STALL   = 8;        // max frames to pause waiting for a late remote input
+const STATE_SYNC_INTERVAL = 60; // slot-0 broadcasts authoritative state every N ticks
+
 // ===== Scenes =====
 const SCENE = { TITLE: 0, MODE_SELECT: 1, LOBBY: 2, PLAYER_SELECT: 3, CHAR_SELECT: 4, STAGE_SELECT: 5, MATCH: 6, RESULT: 7 };
 let scene = SCENE.TITLE;
@@ -96,6 +101,10 @@ let resultText = '';
 // handshake logic in char/stage select and routes match inputs through
 // the WebSocket relay.
 let isOnline = false;
+
+// ===== Online lockstep state =====
+const localInputBuffer = {};  // tick → local input mask (inputs buffered for delayed application)
+let stallFrames = 0;          // consecutive stall frames waiting for remote input
 
 // ===== Online =====
 const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -152,6 +161,48 @@ net.onOpponentLeft = () => {
   isOnline = false;
   scene = SCENE.TITLE;
 };
+
+// Build a compact snapshot of mutable game state for cross-client sync.
+function buildStateSnapshot() {
+  return {
+    fighters: world.fighters.map(f => ({
+      x: f.x, y: f.y, vx: f.vx, vy: f.vy,
+      percent: f.percent, stocks: f.stocks,
+      hitstun: f.hitstun | 0, ko: !!f.ko, facing: f.facing,
+    })),
+    hazards: world.stage.hazards
+      ? world.stage.hazards.map(h => ({ timer: h.timer, warning: h.warning, train: h.train }))
+      : [],
+  };
+}
+
+// Apply an authoritative snapshot received from slot-0 (slot-1 only).
+function applyStateSnapshot(snap) {
+  if (!snap || !world) return;
+  if (snap.fighters) {
+    for (let i = 0; i < snap.fighters.length && i < world.fighters.length; i++) {
+      const src = snap.fighters[i], f = world.fighters[i];
+      f.x = src.x; f.y = src.y; f.vx = src.vx; f.vy = src.vy;
+      f.percent = src.percent; f.stocks = src.stocks;
+      f.hitstun = src.hitstun; f.ko = src.ko; f.facing = src.facing;
+    }
+  }
+  if (snap.hazards && world.stage.hazards) {
+    for (let i = 0; i < snap.hazards.length && i < world.stage.hazards.length; i++) {
+      const src = snap.hazards[i], h = world.stage.hazards[i];
+      if (src.timer  != null) h.timer   = src.timer;
+      if (src.warning != null) h.warning = src.warning;
+      if (src.train  != null) h.train   = src.train;
+    }
+  }
+}
+
+// Slot-1 applies state corrections broadcast by slot-0.
+net.onStateSync = (msg) => {
+  if (net.localSlot !== 1 || !world || !msg.state) return;
+  applyStateSnapshot(msg.state);
+};
+
 net.connect().then(() => { netReady = true; }).catch(() => { netReady = false; });
 
 // ===== World factory =====
@@ -191,25 +242,44 @@ function createWorld(stageIndex) {
 
 // ===== Update / Render Match =====
 function updateMatch() {
-  world.tick++;
-  spriteFrameTick++;
-  if (world.timer > 0) world.timer--;
-
   input.tick();
+
   let masks;
   if (isOnline) {
-    // In online mode the local user drives whichever slot the server
-    // assigned them, regardless of which player index their keyboard /
-    // gamepad happens to be bound to. We collapse every local device
-    // into one mask and pull the opponent's slot from the relay.
-    const localMask =
-      input.deviceMask('kb1') | input.deviceMask('pad0') | input.deviceMask('pad1');
-    net.sendInput(world.tick, localMask);
-    const remoteMask = net.lastRemoteMask || 0;
-    masks = net.localSlot === 0 ? [localMask, remoteMask] : [remoteMask, localMask];
+    const nextTick  = world.tick + 1;
+    const localMask = input.deviceMask('kb1') | input.deviceMask('pad0') | input.deviceMask('pad1');
+
+    // Buffer and send local input exactly once per tick (even during stalls).
+    if (localInputBuffer[nextTick] == null) {
+      localInputBuffer[nextTick] = localMask;
+      net.sendInput(nextTick, localMask);
+    }
+
+    // Lockstep: apply inputs from INPUT_DELAY ticks ago so both clients
+    // always have the peer's input before the simulation needs it.
+    const applyTick = nextTick - INPUT_DELAY;
+    const remoteAt  = applyTick > 0 ? net.remoteInputAt(applyTick) : 0;
+
+    // Pause the simulation for up to MAX_STALL frames while waiting.
+    if (applyTick > 0 && remoteAt === null) {
+      if (++stallFrames <= MAX_STALL) return;
+    } else {
+      stallFrames = 0;
+    }
+
+    const localApply  = applyTick > 0 ? (localInputBuffer[applyTick] ?? 0) : 0;
+    const remoteApply = (applyTick > 0 ? remoteAt : null) ?? net.lastRemoteMask ?? 0;
+    masks = net.localSlot === 0 ? [localApply, remoteApply] : [remoteApply, localApply];
+
+    // Drop entries we no longer need to keep the buffer from growing.
+    delete localInputBuffer[applyTick - 2];
   } else {
     masks = [input.current(0), input.current(1)];
   }
+
+  world.tick++;
+  spriteFrameTick++;
+  if (world.timer > 0) world.timer--;
 
   for (let i = 0; i < world.fighters.length; i++) {
     const f = world.fighters[i];
@@ -247,6 +317,12 @@ function updateMatch() {
       resultText = `${sorted[0].displayName} WINS (Time)`;
       setTimeout(() => { scene = SCENE.RESULT; }, 1500);
     }
+  }
+
+  // Slot-0 periodically broadcasts authoritative state so slot-1 can
+  // correct any accumulated drift in damage, position, stocks, and the train.
+  if (isOnline && net.localSlot === 0 && world.tick % STATE_SYNC_INTERVAL === 0) {
+    net.sendStateSync(world.tick, buildStateSnapshot());
   }
 }
 
